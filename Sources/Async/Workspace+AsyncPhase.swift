@@ -131,8 +131,13 @@ extension Workspace {
             }
         }
 
-        // TODO(rmux Phase 1 Step 6): notify AgentStateEmitter to rewrite .cmux/state.json
-        // and deliver the transition to connected agents via env/state/hook.
+        // Notify the agent-facing contracts. Template seeding runs only when
+        // the workspace has just become Async (idempotent, so every transition
+        // can call it without harm).
+        if mode == .async {
+            AgentStateEmitter.ensureTemplate(for: self)
+        }
+        AgentStateEmitter.writeState(for: self)
         _ = reason  // kept for future telemetry / logging
     }
 

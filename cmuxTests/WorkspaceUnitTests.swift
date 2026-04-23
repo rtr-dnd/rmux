@@ -4926,3 +4926,132 @@ final class AsyncPhaseTransitionTests: XCTestCase {
         XCTAssertLessThan(overrun, 0)
     }
 }
+
+// MARK: - rmux AgentStateEmitter
+// Verifies `.cmux/state.json` is written atomically with the expected schema
+// and that the CLAUDE.async.md template seed is idempotent.
+
+@MainActor
+final class AgentStateEmitterTests: XCTestCase {
+
+    private var tempRoot: URL!
+
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("rmux-agent-state-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+    }
+
+    override func tearDownWithError() throws {
+        if let tempRoot {
+            try? FileManager.default.removeItem(at: tempRoot)
+        }
+        tempRoot = nil
+        try super.tearDownWithError()
+    }
+
+    private func makeWorkspace() -> Workspace {
+        Workspace(workingDirectory: tempRoot.path)
+    }
+
+    private func readStateJSON() throws -> [String: Any] {
+        let url = tempRoot.appendingPathComponent(".cmux/state.json")
+        let data = try Data(contentsOf: url)
+        return try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+    }
+
+    // MARK: writeState
+
+    func testWriteStateProducesFileForSyncing() throws {
+        let w = makeWorkspace()
+        try w.transition(.convertToAsync(initialPhase: .preparing, nextSyncAt: nil))
+        try w.transition(.enterSyncing(plannedDuration: 1800, at: Date(timeIntervalSinceNow: -120)))
+
+        let json = try readStateJSON()
+        XCTAssertEqual(json["phase"] as? String, "syncing")
+        XCTAssertEqual(json["schemaVersion"] as? Int, 1)
+        let syncing = try XCTUnwrap(json["syncing"] as? [String: Any])
+        XCTAssertEqual(syncing["plannedDurationSeconds"] as? Int, 1800)
+        let elapsed = try XCTUnwrap(syncing["elapsedSeconds"] as? Int)
+        XCTAssertGreaterThan(elapsed, 100)
+        XCTAssertLessThan(elapsed, 140)
+    }
+
+    func testWriteStateSelfRunningSectionCarriesNextSync() throws {
+        let w = makeWorkspace()
+        let future = Date(timeIntervalSinceNow: 3600)
+        try w.transition(.convertToAsync(initialPhase: .selfRunning, nextSyncAt: future))
+
+        let json = try readStateJSON()
+        XCTAssertEqual(json["phase"] as? String, "selfRunning")
+        let selfRunning = try XCTUnwrap(json["selfRunning"] as? [String: Any])
+        XCTAssertNotNil(selfRunning["nextSyncAt"])
+        let remaining = try XCTUnwrap(selfRunning["remainingSeconds"] as? Int)
+        XCTAssertGreaterThan(remaining, 3500)
+        XCTAssertLessThan(remaining, 3700)
+        XCTAssertTrue(json["syncing"] is NSNull)
+    }
+
+    func testWriteStateAwaitingAttendanceSection() throws {
+        let w = makeWorkspace()
+        let past = Date(timeIntervalSinceNow: -300)
+        try w.transition(.convertToAsync(initialPhase: .selfRunning, nextSyncAt: past))
+        try w.transition(.markAwaitingAttendance)
+
+        let json = try readStateJSON()
+        XCTAssertEqual(json["phase"] as? String, "awaitingAttendance")
+        let awaiting = try XCTUnwrap(json["awaitingAttendance"] as? [String: Any])
+        let overdue = try XCTUnwrap(awaiting["overdueSeconds"] as? Int)
+        XCTAssertGreaterThan(overdue, 200)
+    }
+
+    func testWriteStateRemovedOnRevertToNormal() throws {
+        let w = makeWorkspace()
+        try w.transition(.convertToAsync(initialPhase: .preparing, nextSyncAt: nil))
+        try w.transition(.revertToNormal)
+
+        let url = tempRoot.appendingPathComponent(".cmux/state.json")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+    }
+
+    // MARK: template seeding
+
+    func testEnsureTemplateWritesClaudeAsyncMarkdownOnFirstConvert() throws {
+        let w = makeWorkspace()
+        try w.transition(.convertToAsync(initialPhase: .preparing, nextSyncAt: nil))
+
+        let url = tempRoot.appendingPathComponent("CLAUDE.async.md")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
+        let body = try String(contentsOf: url, encoding: .utf8)
+        XCTAssertTrue(body.contains("rmux Async workspace"))
+        XCTAssertTrue(body.contains(".cmux/state.json"))
+    }
+
+    func testEnsureTemplateNeverOverwritesExistingFile() throws {
+        let url = tempRoot.appendingPathComponent("CLAUDE.async.md")
+        try "custom user content".write(to: url, atomically: true, encoding: .utf8)
+
+        let w = makeWorkspace()
+        try w.transition(.convertToAsync(initialPhase: .preparing, nextSyncAt: nil))
+
+        let body = try String(contentsOf: url, encoding: .utf8)
+        XCTAssertEqual(body, "custom user content")
+    }
+
+    // MARK: home-directory safety guard
+
+    func testWriteStateSkipsWhenCwdEqualsHome() throws {
+        let w = Workspace()  // defaults currentDirectory to $HOME
+        try w.transition(.convertToAsync(initialPhase: .preparing, nextSyncAt: nil))
+
+        let url = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".cmux/state.json")
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: url.path),
+            "AgentStateEmitter must refuse to write into the user's $HOME even when the workspace cwd points there."
+        )
+    }
+}
