@@ -11,6 +11,7 @@ struct SelfRunningOverlay: View {
     let onSyncNow: () -> Void
 
     @State private var isSchedulingSheetPresented = false
+    @State private var isSyncNowConfirmPresented = false
 
     var body: some View {
         VStack(spacing: 28) {
@@ -35,8 +36,10 @@ struct SelfRunningOverlay: View {
                 Button("スケジュール変更") {
                     isSchedulingSheetPresented = true
                 }
-                Button("今すぐ Sync", action: onSyncNow)
-                    .buttonStyle(.borderedProminent)
+                Button("今すぐ Sync") {
+                    isSyncNowConfirmPresented = true
+                }
+                .buttonStyle(.borderedProminent)
             }
             .controlSize(.large)
 
@@ -58,6 +61,15 @@ struct SelfRunningOverlay: View {
                     isSchedulingSheetPresented = false
                 }
             )
+        }
+        // Phase 1 Step 10: minimal confirmation before the self-running
+        // interrupt. The stronger cwd-full-path friction lives in Phase 2
+        // (spec.md §6.1.6); this covers the MVP floor.
+        .alert("今すぐ Sync しますか？", isPresented: $isSyncNowConfirmPresented) {
+            Button("キャンセル", role: .cancel) {}
+            Button("開始") { onSyncNow() }
+        } message: {
+            Text("裏で走っている自走作業が中断されます。")
         }
     }
 

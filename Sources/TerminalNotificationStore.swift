@@ -905,6 +905,23 @@ final class TerminalNotificationStore: ObservableObject {
         cooldownKey: String? = nil,
         cooldownInterval: TimeInterval? = nil
     ) {
+        // Phase 1 Step 11 — rmux Async suppression gate. Workspaces that are
+        // in `selfRunning` or `awaitingAttendance` are exactly the windows the
+        // human is supposed to be ignoring, so any agent-emitted notification
+        // must not light up badges, play sound, or fire a macOS notification.
+        // docs-rmux/spec.md §5.3 ultimately asks us to *retain* these records
+        // so the next Sync can review them; that retention feature is deferred
+        // — for Phase 1 we drop them with a TODO so the "forget completely"
+        // promise is at least honoured visibly.
+        if let workspace = AppDelegate.shared?.tabManager?.tabs.first(where: { $0.id == tabId }),
+           workspace.mode == .async,
+           workspace.asyncPhase == .selfRunning || workspace.asyncPhase == .awaitingAttendance {
+            // TODO(rmux Phase 1 follow-up): stash suppressed notifications and
+            // flush them into `notifications` when the workspace next enters
+            // `syncing` (spec §5.3 / §5.4).
+            return
+        }
+
         let now = Date()
         let resolvedCooldownInterval: TimeInterval?
         if let cooldownInterval, cooldownInterval.isFinite, cooldownInterval > 0 {
