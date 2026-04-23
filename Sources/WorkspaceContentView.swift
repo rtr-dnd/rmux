@@ -387,99 +387,15 @@ struct WorkspaceContentView: View {
                 }
             }
 
-            asyncPhaseOverlay
-                .transition(.opacity.animation(.easeInOut(duration: 0.15)))
-
-            #if DEBUG
-            debugCycleAsyncPhaseHotkey
-            #endif
-        }
-    }
-
-    #if DEBUG
-    /// Invisible Button wired to ⌃⌥⌘P that cycles the current workspace
-    /// through the Async phase machine for overlay development (Phase 1
-    /// Step 3). Not shown in Release builds.
-    private var debugCycleAsyncPhaseHotkey: some View {
-        Button(action: debugCycleAsyncPhase) { EmptyView() }
-            .keyboardShortcut("p", modifiers: [.control, .option, .command])
-            .opacity(0)
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
-    }
-
-    private func debugCycleAsyncPhase() {
-        do {
-            switch (workspace.mode, workspace.asyncPhase) {
-            case (.normal, _):
-                try workspace.transition(.convertToAsync(initialPhase: .preparing, nextSyncAt: nil))
-            case (.async, .preparing):
-                try workspace.transition(.enterSyncing(plannedDuration: 1800, at: Date()))
-            case (.async, .syncing):
-                try workspace.transition(.endSyncing(
-                    nextSyncAt: Date().addingTimeInterval(3600),
-                    at: Date()
-                ))
-            case (.async, .selfRunning):
-                try workspace.transition(.markAwaitingAttendance)
-            case (.async, .awaitingAttendance):
-                try workspace.transition(.startOverdueSession)
-            case (.async, nil):
-                break
-            }
-        } catch {
-            NSLog("[rmux debug] async phase cycle failed: \(error)")
-        }
-    }
-    #endif
-
-    /// Async workspace overlay (Phase 1 Step 3 shell). Shown on top of the
-    /// bonsplit view while the workspace is in `preparing` / `selfRunning` /
-    /// `awaitingAttendance`. The terminal tree stays mounted underneath so the
-    /// agent keeps running; see docs-rmux/spec.md §6.1.
-    @ViewBuilder
-    private var asyncPhaseOverlay: some View {
-        if workspace.mode == .async, let phase = workspace.asyncPhase {
-            switch phase {
-            case .preparing:
-                ReadyToSyncOverlay(
-                    workspaceTitle: workspace.title,
-                    onStart: { duration in
-                        try? workspace.transition(.enterSyncing(plannedDuration: duration, at: Date()))
-                    },
-                    onCancel: {
-                        try? workspace.transition(.cancelPreparing)
-                    }
-                )
-            case .selfRunning:
-                if let nextSyncAt = workspace.nextSyncAt {
-                    SelfRunningOverlay(
-                        workspaceTitle: workspace.title,
-                        nextSyncAt: nextSyncAt,
-                        onChangeSchedule: {
-                            // TODO(rmux Phase 1 Step 4): present ScheduleNextSyncSheet here.
-                        },
-                        onSyncNow: {
-                            try? workspace.transition(.interruptToPreparing)
-                        }
-                    )
-                }
-            case .awaitingAttendance:
-                if let scheduledAt = workspace.nextSyncAt {
-                    OverdueOverlay(
-                        workspaceTitle: workspace.title,
-                        scheduledAt: scheduledAt,
-                        onStartNow: {
-                            try? workspace.transition(.startOverdueSession)
-                        },
-                        onReschedule: {
-                            // TODO(rmux Phase 1 Step 4): present ScheduleNextSyncSheet here.
-                        }
-                    )
-                }
-            case .syncing:
-                EmptyView()  // no overlay — the terminal is foreground during sync
-            }
+            // Bonsplit hosts the terminal surfaces as portal-backed AppKit
+            // views that sit above sibling SwiftUI content, so the Async
+            // overlay cannot live in a SwiftUI ZStack here. AsyncOverlayMount
+            // is an invisible NSViewRepresentable whose coordinator installs
+            // an NSHostingView for the overlay on the window's contentView.
+            AsyncOverlayMount(workspace: workspace)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .opacity(0)
+                .allowsHitTesting(false)
         }
     }
 

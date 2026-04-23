@@ -6334,6 +6334,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         sendTextWhenReady(command, to: tab)
     }
 
+    // Phase 1 Step 3 — manual verification hook. Cycles the currently selected
+    // workspace through the Async phase state machine so the overlays can be
+    // eyeballed without needing a full create-flow UI yet.
+    @objc func debugCycleAsyncPhase(_ sender: Any?) {
+        guard let workspace = tabManager?.selectedWorkspace else { return }
+        do {
+            switch (workspace.mode, workspace.asyncPhase) {
+            case (.normal, _):
+                try workspace.transition(.convertToAsync(initialPhase: .preparing, nextSyncAt: nil))
+            case (.async, .preparing):
+                try workspace.transition(.enterSyncing(plannedDuration: 1800, at: Date()))
+            case (.async, .syncing):
+                try workspace.transition(.endSyncing(
+                    nextSyncAt: Date().addingTimeInterval(3600),
+                    at: Date()
+                ))
+            case (.async, .selfRunning):
+                try workspace.transition(.markAwaitingAttendance)
+            case (.async, .awaitingAttendance):
+                try workspace.transition(.startOverdueSession)
+            case (.async, nil):
+                break
+            }
+        } catch {
+            NSLog("[rmux debug] cycle async phase failed: \(error)")
+        }
+    }
+
     @objc func openDebugLoremTab(_ sender: Any?) {
         guard let tabManager else { return }
         let tab = tabManager.addTab()

@@ -316,6 +316,11 @@ struct cmuxApp: App {
 
 #if DEBUG
             CommandMenu("Debug") {
+                Button("Cycle Async Phase") {
+                    appDelegate.debugCycleAsyncPhase(nil)
+                }
+                .keyboardShortcut("p", modifiers: [.control, .option, .command])
+
                 Button("New Tab With Lorem Search Text") {
                     appDelegate.openDebugLoremTab(nil)
                 }

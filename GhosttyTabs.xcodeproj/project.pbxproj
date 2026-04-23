@@ -20,6 +20,7 @@
 		2E60562426CE58A251FC3EC8 /* AsyncPhase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A14E58C7D3E1234D0BD086E /* AsyncPhase.swift */; };
 		3023A1003023A1003023A100 /* ConfigSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3023B1003023B1003023B100 /* ConfigSource.swift */; };
 		3023A1013023A1013023A101 /* ConfigSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3023B1013023B1013023B101 /* ConfigSettingsView.swift */; };
+		32EF5C42171F636AEF47DCEE /* AsyncOverlayMount.swift in Sources */ = {isa = PBXBuildFile; fileRef = A775521A38E13467DD816FE2 /* AsyncOverlayMount.swift */; };
 		350DAC5EBD38642A3E81471A /* AuthManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 312DE7503B4658DD173121B8 /* AuthManager.swift */; };
 		36CE99ED050785B5E96B72BB /* AuthCallbackRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61A19A4145F034965110CF87 /* AuthCallbackRouter.swift */; };
 		41E6CB37A24C4687FDDE2470 /* Workspace+AsyncPhase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09013961C9FBBBF96D2FC2EE /* Workspace+AsyncPhase.swift */; };
@@ -342,6 +343,7 @@
 		A5008382 /* CommandPaletteSearchEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandPaletteSearchEngineTests.swift; sourceTree = "<group>"; };
 		A500RG00 /* ReactGrab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Panels/ReactGrab.swift; sourceTree = "<group>"; };
 		A5F10010A1B2C3D4E5F60719 /* KeyboardShortcutSettingsFileStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardShortcutSettingsFileStore.swift; sourceTree = "<group>"; };
+		A775521A38E13467DD816FE2 /* AsyncOverlayMount.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AsyncOverlayMount.swift; sourceTree = "<group>"; };
 		AA1B2C3D4E5F60719 /* BonsplitTabDragUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BonsplitTabDragUITests.swift; sourceTree = "<group>"; };
 		B09C007F42697761B5F1A2AB /* OmnibarAndToolsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OmnibarAndToolsTests.swift; sourceTree = "<group>"; };
 		B2E7294509CC42FE9191870E /* xterm-ghostty */ = {isa = PBXFileReference; lastKnownFileType = file; path = "ghostty/terminfo/78/xterm-ghostty"; sourceTree = "<group>"; };
@@ -506,6 +508,7 @@
 				9E05E26153D02E51B0354B52 /* ReadyToSyncOverlay.swift */,
 				E1C71F4210DC56925892C353 /* SelfRunningOverlay.swift */,
 				3AF83C07CF4AB82283B29278 /* OverdueOverlay.swift */,
+				A775521A38E13467DD816FE2 /* AsyncOverlayMount.swift */,
 			);
 			name = Async;
 			path = Async;
@@ -998,6 +1001,7 @@
 				4E9B97E1EB4DE57441E43F61 /* ReadyToSyncOverlay.swift in Sources */,
 				870BECE6085646D2D2D8F951 /* SelfRunningOverlay.swift in Sources */,
 				1C3640B663118B5A0F43F65C /* OverdueOverlay.swift in Sources */,
+				32EF5C42171F636AEF47DCEE /* AsyncOverlayMount.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

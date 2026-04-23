@@ -2413,6 +2413,8 @@ class TerminalController {
             return v2Result(id: id, self.v2DebugShortcutSet(params: params))
         case "debug.shortcut.simulate":
             return v2Result(id: id, self.v2DebugShortcutSimulate(params: params))
+        case "debug.rmux.cycle_async_phase":
+            return v2Result(id: id, self.v2DebugRmuxCycleAsyncPhase())
         case "debug.type":
             return v2Result(id: id, self.v2DebugType(params: params))
         case "debug.app.activate":
@@ -10850,6 +10852,25 @@ class TerminalController {
         return resp == "OK"
             ? .ok([:])
             : .err(code: "internal_error", message: resp, data: nil)
+    }
+
+    // Phase 1 Step 3 — socket hook so Python / scripts can drive the Async
+    // state machine on the selected workspace without relying on menu key
+    // equivalents reaching the responder chain.
+    private func v2DebugRmuxCycleAsyncPhase() -> V2CallResult {
+        var result: V2CallResult = .err(code: "internal_error", message: "unexpected path", data: nil)
+        DispatchQueue.main.sync {
+            AppDelegate.shared?.debugCycleAsyncPhase(nil)
+            if let ws = AppDelegate.shared?.tabManager?.selectedWorkspace {
+                result = .ok([
+                    "mode": ws.mode.rawValue,
+                    "phase": ws.asyncPhase?.rawValue as Any,
+                ])
+            } else {
+                result = .err(code: "not_found", message: "No selected workspace", data: nil)
+            }
+        }
+        return result
     }
 
     private func v2DebugType(params: [String: Any]) -> V2CallResult {
