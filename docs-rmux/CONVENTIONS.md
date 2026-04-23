@@ -19,8 +19,26 @@
 
 ## 2. コード配置
 
+### 新規ファイルの追加手順
+
+`GhosttyTabs.xcodeproj/project.pbxproj` は個別ファイル列挙方式（自動検出ではない）。新しい `.swift` ファイルを作るときは **必ず `scripts/add-swift-file.sh` 経由** で登録すること:
+
+```sh
+# 既定では path prefix から target を自動判定
+./scripts/add-swift-file.sh Sources/Async/Foo.swift            # → GhosttyTabs
+./scripts/add-swift-file.sh cmuxTests/BarTests.swift           # → cmuxTests
+./scripts/add-swift-file.sh cmuxUITests/BazUITests.swift       # → cmuxUITests
+
+# target を明示したい場合
+./scripts/add-swift-file.sh path/to/File.swift --target GhosttyTabs
+```
+
+ファイルが無ければ最小スタブを作り、すでに登録済みなら no-op で抜ける（冪等）。裏は Homebrew cocoapods 同梱の `xcodeproj` Ruby gem を使う。未インストールなら `brew install cocoapods`。
+
+**絶対に `project.pbxproj` を手で編集しない。** UUID 衝突やセクション不整合が混入しやすい。
+
 ### 新規ファイル
-原則 `Sources/Async/` 下（ディレクトリは新設）:
+原則 `Sources/Async/` 下（ディレクトリは新設、add-swift-file.sh で新規登録）:
 - `Sources/Async/AgentStateEmitter.swift`
 - `Sources/Async/SyncSessionScheduler.swift`
 - `Sources/Async/ReadyToSyncOverlay.swift`
