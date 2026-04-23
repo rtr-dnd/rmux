@@ -4571,3 +4571,347 @@ final class SidebarWorkspaceShortcutHintMetricsTests: XCTestCase {
         XCTAssertGreaterThan(widened, base)
     }
 }
+
+// MARK: - rmux Async workspace phase transitions
+// Covers `Workspace.transition(_:reason:)` and derived helpers.
+// See docs-rmux/spec.md §3, docs-rmux/plan.md §2.2 / §9.1.
+
+@MainActor
+final class AsyncPhaseTransitionTests: XCTestCase {
+
+    // MARK: convertToAsync
+
+    func testConvertToAsyncPreparingFromNormal() throws {
+        let w = Workspace()
+        XCTAssertEqual(w.mode, .normal)
+        XCTAssertNil(w.asyncPhase)
+
+        try w.transition(.convertToAsync(initialPhase: .preparing, nextSyncAt: nil))
+        XCTAssertEqual(w.mode, .async)
+        XCTAssertEqual(w.asyncPhase, .preparing)
+        XCTAssertNil(w.nextSyncAt)
+        XCTAssertNil(w.syncStartedAt)
+        XCTAssertNil(w.plannedDuration)
+    }
+
+    func testConvertToAsyncSelfRunningRequiresNextSyncAt() {
+        let w = Workspace()
+        XCTAssertThrowsError(
+            try w.transition(.convertToAsync(initialPhase: .selfRunning, nextSyncAt: nil))
+        ) { error in
+            XCTAssertEqual(error as? AsyncPhaseTransitionError, .missingNextSyncAt)
+        }
+    }
+
+    func testConvertToAsyncSelfRunningSetsNextSyncAt() throws {
+        let w = Workspace()
+        let future = Date(timeIntervalSinceNow: 3600)
+        try w.transition(.convertToAsync(initialPhase: .selfRunning, nextSyncAt: future))
+        XCTAssertEqual(w.asyncPhase, .selfRunning)
+        XCTAssertEqual(w.nextSyncAt, future)
+    }
+
+    func testConvertToAsyncRejectsSyncingInitialPhase() {
+        let w = Workspace()
+        XCTAssertThrowsError(
+            try w.transition(.convertToAsync(initialPhase: .syncing, nextSyncAt: nil))
+        ) { error in
+            XCTAssertEqual(error as? AsyncPhaseTransitionError, .unsupportedInitialPhase(.syncing))
+        }
+    }
+
+    func testConvertToAsyncRejectsAwaitingInitialPhase() {
+        let w = Workspace()
+        XCTAssertThrowsError(
+            try w.transition(.convertToAsync(initialPhase: .awaitingAttendance, nextSyncAt: Date()))
+        ) { error in
+            XCTAssertEqual(
+                error as? AsyncPhaseTransitionError,
+                .unsupportedInitialPhase(.awaitingAttendance)
+            )
+        }
+    }
+
+    func testConvertToAsyncRejectsWhenAlreadyAsync() throws {
+        let w = Workspace()
+        try w.transition(.convertToAsync(initialPhase: .preparing, nextSyncAt: nil))
+        XCTAssertThrowsError(
+            try w.transition(.convertToAsync(initialPhase: .preparing, nextSyncAt: nil))
+        ) { error in
+            XCTAssertEqual(
+                error as? AsyncPhaseTransitionError,
+                .invalidSource(mode: .async, phase: .preparing)
+            )
+        }
+    }
+
+    // MARK: enterSyncing
+
+    func testEnterSyncingHappyPath() throws {
+        let w = Workspace()
+        try w.transition(.convertToAsync(initialPhase: .preparing, nextSyncAt: nil))
+        let now = Date()
+        try w.transition(.enterSyncing(plannedDuration: 1800, at: now))
+        XCTAssertEqual(w.asyncPhase, .syncing)
+        XCTAssertEqual(w.syncStartedAt, now)
+        XCTAssertEqual(w.plannedDuration, 1800)
+        XCTAssertNil(w.nextSyncAt)
+    }
+
+    func testEnterSyncingRejectsZeroDuration() throws {
+        let w = Workspace()
+        try w.transition(.convertToAsync(initialPhase: .preparing, nextSyncAt: nil))
+        XCTAssertThrowsError(
+            try w.transition(.enterSyncing(plannedDuration: 0, at: Date()))
+        ) { error in
+            XCTAssertEqual(
+                error as? AsyncPhaseTransitionError,
+                .invalidPlannedDuration(0)
+            )
+        }
+    }
+
+    func testEnterSyncingRejectsNegativeDuration() throws {
+        let w = Workspace()
+        try w.transition(.convertToAsync(initialPhase: .preparing, nextSyncAt: nil))
+        XCTAssertThrowsError(
+            try w.transition(.enterSyncing(plannedDuration: -5, at: Date()))
+        )
+    }
+
+    func testEnterSyncingFromNonPreparingRejected() {
+        let w = Workspace()
+        XCTAssertThrowsError(
+            try w.transition(.enterSyncing(plannedDuration: 1800, at: Date()))
+        )
+    }
+
+    // MARK: endSyncing
+
+    func testEndSyncingHappyPath() throws {
+        let w = Workspace()
+        try w.transition(.convertToAsync(initialPhase: .preparing, nextSyncAt: nil))
+        let start = Date()
+        try w.transition(.enterSyncing(plannedDuration: 1800, at: start))
+
+        let end = start.addingTimeInterval(1200)
+        let next = end.addingTimeInterval(3600)
+        try w.transition(.endSyncing(nextSyncAt: next, at: end))
+
+        XCTAssertEqual(w.asyncPhase, .selfRunning)
+        XCTAssertEqual(w.nextSyncAt, next)
+        XCTAssertNil(w.syncStartedAt)
+        XCTAssertNil(w.plannedDuration)
+        XCTAssertEqual(w.lastSyncEndedAt, end)
+    }
+
+    func testEndSyncingRejectsNextSyncAtInPast() throws {
+        let w = Workspace()
+        try w.transition(.convertToAsync(initialPhase: .preparing, nextSyncAt: nil))
+        try w.transition(.enterSyncing(plannedDuration: 1800, at: Date()))
+        let now = Date()
+        XCTAssertThrowsError(
+            try w.transition(.endSyncing(nextSyncAt: now.addingTimeInterval(-100), at: now))
+        )
+    }
+
+    func testEndSyncingFromNonSyncingRejected() {
+        let w = Workspace()
+        XCTAssertThrowsError(
+            try w.transition(.endSyncing(nextSyncAt: Date().addingTimeInterval(3600), at: Date()))
+        )
+    }
+
+    // MARK: markAwaitingAttendance
+
+    func testMarkAwaitingAttendancePreservesNextSyncAt() throws {
+        let w = Workspace()
+        let future = Date(timeIntervalSinceNow: 3600)
+        try w.transition(.convertToAsync(initialPhase: .selfRunning, nextSyncAt: future))
+        try w.transition(.markAwaitingAttendance)
+        XCTAssertEqual(w.asyncPhase, .awaitingAttendance)
+        XCTAssertEqual(w.nextSyncAt, future)
+    }
+
+    func testMarkAwaitingAttendanceFromNonSelfRunningRejected() {
+        let w = Workspace()
+        XCTAssertThrowsError(try w.transition(.markAwaitingAttendance))
+    }
+
+    // MARK: interrupt / startOverdue / reschedule
+
+    func testInterruptToPreparingFromSelfRunningKeepsNextSyncAt() throws {
+        let w = Workspace()
+        let future = Date(timeIntervalSinceNow: 3600)
+        try w.transition(.convertToAsync(initialPhase: .selfRunning, nextSyncAt: future))
+        try w.transition(.interruptToPreparing)
+        XCTAssertEqual(w.asyncPhase, .preparing)
+        XCTAssertEqual(w.nextSyncAt, future)
+    }
+
+    func testStartOverdueSessionFromAwaitingKeepsPastNextSyncAt() throws {
+        let w = Workspace()
+        let past = Date(timeIntervalSinceNow: -120)
+        try w.transition(.convertToAsync(initialPhase: .selfRunning, nextSyncAt: past))
+        try w.transition(.markAwaitingAttendance)
+        try w.transition(.startOverdueSession)
+        XCTAssertEqual(w.asyncPhase, .preparing)
+        XCTAssertEqual(w.nextSyncAt, past)
+    }
+
+    func testRescheduleFromAwaitingMovesNextSyncAt() throws {
+        let w = Workspace()
+        let original = Date(timeIntervalSinceNow: -60)
+        try w.transition(.convertToAsync(initialPhase: .selfRunning, nextSyncAt: original))
+        try w.transition(.markAwaitingAttendance)
+
+        let new = Date(timeIntervalSinceNow: 7200)
+        try w.transition(.reschedule(nextSyncAt: new))
+        XCTAssertEqual(w.asyncPhase, .selfRunning)
+        XCTAssertEqual(w.nextSyncAt, new)
+    }
+
+    func testRescheduleRejectsPastDate() throws {
+        let w = Workspace()
+        try w.transition(.convertToAsync(initialPhase: .selfRunning, nextSyncAt: Date(timeIntervalSinceNow: -60)))
+        try w.transition(.markAwaitingAttendance)
+        XCTAssertThrowsError(
+            try w.transition(.reschedule(nextSyncAt: Date(timeIntervalSinceNow: -30)))
+        )
+    }
+
+    // MARK: cancelPreparing
+
+    func testCancelPreparingReturnsToSelfRunningWhenNextSyncAtFuture() throws {
+        let w = Workspace()
+        let future = Date(timeIntervalSinceNow: 3600)
+        try w.transition(.convertToAsync(initialPhase: .selfRunning, nextSyncAt: future))
+        try w.transition(.interruptToPreparing)
+        try w.transition(.cancelPreparing)
+        XCTAssertEqual(w.asyncPhase, .selfRunning)
+        XCTAssertEqual(w.nextSyncAt, future)
+    }
+
+    func testCancelPreparingReturnsToAwaitingAttendanceWhenNextSyncAtPast() throws {
+        let w = Workspace()
+        let past = Date(timeIntervalSinceNow: -120)
+        try w.transition(.convertToAsync(initialPhase: .selfRunning, nextSyncAt: past))
+        try w.transition(.markAwaitingAttendance)
+        try w.transition(.startOverdueSession)
+        try w.transition(.cancelPreparing)
+        XCTAssertEqual(w.asyncPhase, .awaitingAttendance)
+        XCTAssertEqual(w.nextSyncAt, past)
+    }
+
+    func testCancelPreparingRevertsToNormalWhenNoPriorSchedule() throws {
+        let w = Workspace()
+        try w.transition(.convertToAsync(initialPhase: .preparing, nextSyncAt: nil))
+        try w.transition(.cancelPreparing)
+        XCTAssertEqual(w.mode, .normal)
+        XCTAssertNil(w.asyncPhase)
+        XCTAssertNil(w.nextSyncAt)
+    }
+
+    // MARK: revertToNormal
+
+    func testRevertToNormalClearsAsyncButKeepsLastSyncEndedAt() throws {
+        let w = Workspace()
+        try w.transition(.convertToAsync(initialPhase: .preparing, nextSyncAt: nil))
+        try w.transition(.enterSyncing(plannedDuration: 600, at: Date()))
+        let end = Date()
+        try w.transition(.endSyncing(nextSyncAt: end.addingTimeInterval(3600), at: end))
+        XCTAssertNotNil(w.lastSyncEndedAt)
+
+        try w.transition(.revertToNormal)
+        XCTAssertEqual(w.mode, .normal)
+        XCTAssertNil(w.asyncPhase)
+        XCTAssertNil(w.nextSyncAt)
+        XCTAssertNil(w.syncStartedAt)
+        XCTAssertNil(w.plannedDuration)
+        XCTAssertNotNil(w.lastSyncEndedAt, "historical record should survive revert")
+    }
+
+    func testRevertToNormalRejectedWhenAlreadyNormal() {
+        let w = Workspace()
+        XCTAssertThrowsError(try w.transition(.revertToNormal))
+    }
+
+    // MARK: Derived helpers
+
+    func testRemainingUntilSyncNilWhenNoSchedule() {
+        let w = Workspace()
+        XCTAssertNil(w.remainingUntilSync)
+    }
+
+    func testRemainingUntilSyncPositiveWhenFuture() throws {
+        let w = Workspace()
+        try w.transition(.convertToAsync(initialPhase: .selfRunning, nextSyncAt: Date(timeIntervalSinceNow: 3600)))
+        guard let remaining = w.remainingUntilSync else {
+            XCTFail("remainingUntilSync should be non-nil in selfRunning")
+            return
+        }
+        XCTAssertGreaterThan(remaining, 3500)
+        XCTAssertLessThan(remaining, 3700)
+    }
+
+    func testOverdueDurationNilOutsideAwaiting() throws {
+        let w = Workspace()
+        XCTAssertNil(w.overdueDuration)
+        try w.transition(.convertToAsync(initialPhase: .selfRunning, nextSyncAt: Date(timeIntervalSinceNow: -60)))
+        XCTAssertNil(w.overdueDuration, "selfRunning should not expose overdueDuration")
+    }
+
+    func testOverdueDurationPositiveDuringAwaiting() throws {
+        let w = Workspace()
+        let past = Date(timeIntervalSinceNow: -300)
+        try w.transition(.convertToAsync(initialPhase: .selfRunning, nextSyncAt: past))
+        try w.transition(.markAwaitingAttendance)
+        guard let overdue = w.overdueDuration else {
+            XCTFail("overdueDuration should be non-nil during awaitingAttendance")
+            return
+        }
+        XCTAssertGreaterThan(overdue, 200)
+        XCTAssertLessThan(overdue, 400)
+    }
+
+    func testElapsedSinceSyncStartNilOutsideSyncing() {
+        let w = Workspace()
+        XCTAssertNil(w.elapsedSinceSyncStart)
+    }
+
+    func testElapsedSinceSyncStartGrowsDuringSyncing() throws {
+        let w = Workspace()
+        try w.transition(.convertToAsync(initialPhase: .preparing, nextSyncAt: nil))
+        try w.transition(.enterSyncing(plannedDuration: 1800, at: Date(timeIntervalSinceNow: -120)))
+        guard let elapsed = w.elapsedSinceSyncStart else {
+            XCTFail("elapsedSinceSyncStart should be non-nil during syncing")
+            return
+        }
+        XCTAssertGreaterThan(elapsed, 100)
+        XCTAssertLessThan(elapsed, 140)
+    }
+
+    func testSyncOverrunPositiveWhenExceedingPlanned() throws {
+        let w = Workspace()
+        try w.transition(.convertToAsync(initialPhase: .preparing, nextSyncAt: nil))
+        // Started 400s ago with a 300s budget → overrun ~100s
+        try w.transition(.enterSyncing(plannedDuration: 300, at: Date(timeIntervalSinceNow: -400)))
+        guard let overrun = w.syncOverrun else {
+            XCTFail("syncOverrun should be non-nil during syncing")
+            return
+        }
+        XCTAssertGreaterThan(overrun, 50)
+    }
+
+    func testSyncOverrunNegativeWhenWithinPlanned() throws {
+        let w = Workspace()
+        try w.transition(.convertToAsync(initialPhase: .preparing, nextSyncAt: nil))
+        // Started 60s ago with a 1800s budget → far under
+        try w.transition(.enterSyncing(plannedDuration: 1800, at: Date(timeIntervalSinceNow: -60)))
+        guard let overrun = w.syncOverrun else {
+            XCTFail("syncOverrun should be non-nil during syncing")
+            return
+        }
+        XCTAssertLessThan(overrun, 0)
+    }
+}
