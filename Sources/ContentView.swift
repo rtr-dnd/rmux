@@ -9077,7 +9077,10 @@ struct VerticalTabsSidebar: View {
                                     allContextMenuWorkspacesHideTerminalScrollBar: allContextMenuWorkspacesHideTerminalScrollBar,
                                     settings: tabItemSettings,
                                     livePresentation: livePresentation,
-                                    frozenPresentation: $frozenTabItemPresentation
+                                    frozenPresentation: $frozenTabItemPresentation,
+                                    asyncPhaseBadge: tab.mode == .async
+                                        ? TabItemView.asyncPhaseBadge(for: tab.asyncPhase)
+                                        : nil
                                 )
                                 .equatable()
                             }
@@ -11520,6 +11523,19 @@ private final class SidebarTabItemContextMenuState: ObservableObject {
 private struct TabItemView: View, Equatable {
     private static let workspaceObservationCoalesceInterval: RunLoop.SchedulerTimeType.Stride = .milliseconds(40)
 
+    /// Compact phase label used in sidebar rows. Time-sensitive detail (live
+    /// elapsed / remaining) is intentionally omitted so the row's Equatable
+    /// check stays coarse and the sidebar doesn't re-render every tick.
+    static func asyncPhaseBadge(for phase: AsyncPhase?) -> String? {
+        switch phase {
+        case .preparing: return "Ready"
+        case .syncing: return "Sync 中"
+        case .selfRunning: return "自走"
+        case .awaitingAttendance: return "Overdue"
+        case .none: return nil
+        }
+    }
+
     // Closures, Bindings, and object references are excluded from ==
     // because they're recreated every parent eval but don't affect rendering.
     nonisolated static func == (lhs: TabItemView, rhs: TabItemView) -> Bool {
@@ -11539,7 +11555,8 @@ private struct TabItemView: View, Equatable {
         lhs.allRemoteContextMenuTargetsConnecting == rhs.allRemoteContextMenuTargetsConnecting &&
         lhs.allRemoteContextMenuTargetsDisconnected == rhs.allRemoteContextMenuTargetsDisconnected &&
         lhs.allContextMenuWorkspacesHideTerminalScrollBar == rhs.allContextMenuWorkspacesHideTerminalScrollBar &&
-        lhs.settings == rhs.settings
+        lhs.settings == rhs.settings &&
+        lhs.asyncPhaseBadge == rhs.asyncPhaseBadge
     }
 
     // Use plain references instead of @EnvironmentObject to avoid subscribing
@@ -11573,6 +11590,10 @@ private struct TabItemView: View, Equatable {
     let settings: SidebarTabItemSettingsSnapshot
     let livePresentation: SidebarTabItemPresentationSnapshot
     @Binding var frozenPresentation: SidebarTabItemPresentationSnapshot?
+    /// Phase-aware sidebar label for Async workspaces (nil for Normal).
+    /// Precomputed by the parent so the Equatable optimisation keeps row
+    /// invalidation tight (CLAUDE.md pitfall). See plan.md §6.8.
+    let asyncPhaseBadge: String?
     @State private var workspaceSnapshotStorage: SidebarWorkspaceSnapshotBuilder.Snapshot?
     @StateObject private var contextMenuState = SidebarTabItemContextMenuState()
     @State private var isHovering = false
@@ -11846,6 +11867,16 @@ private struct TabItemView: View, Equatable {
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .layoutPriority(1)
+
+                if let asyncPhaseBadge {
+                    Text(asyncPhaseBadge)
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundColor(activeSecondaryColor(0.9))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 1)
+                        .background(activeSecondaryColor(0.15), in: Capsule())
+                        .fixedSize()
+                }
 
                 Spacer(minLength: 0)
 
