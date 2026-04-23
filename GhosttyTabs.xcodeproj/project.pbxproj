@@ -28,6 +28,7 @@
 		46F6AC15863EC84DCD3770A2 /* TerminalAndGhosttyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02FC74F2C27127CC565B3E8C /* TerminalAndGhosttyTests.swift */; };
 		4D8B37E0E11A29997632765F /* InternalTabDragConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 610008EA5E3744DDBE05C8E2 /* InternalTabDragConfiguration.swift */; };
 		4E9B97E1EB4DE57441E43F61 /* ReadyToSyncOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E05E26153D02E51B0354B52 /* ReadyToSyncOverlay.swift */; };
+		518EF0CC4F72CA1001180E8A /* SyncSessionScheduler.swift in Sources */ = {isa = PBXBuildFile; fileRef = F73543E1FE38D566F501FD8A /* SyncSessionScheduler.swift */; };
 		5C3E0454B6C24B02A2F091A8 /* ShortcutRoutingSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B42A82C6AA614E74873D9A5F /* ShortcutRoutingSupport.swift */; };
 		5EDB6027B346C46521A93C74 /* CMUXAuthCore in Frameworks */ = {isa = PBXBuildFile; productRef = 29813FE5A6CBC1019289A251 /* CMUXAuthCore */; };
 		619D509BC9B1EA946CBD6A8A /* WorkspaceRuntimeSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9960CC3992F3C44489E7627C /* WorkspaceRuntimeSettings.swift */; };
@@ -395,6 +396,7 @@
 		F6000001A1B2C3D4E5F60718 /* AppDelegateShortcutRoutingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegateShortcutRoutingTests.swift; sourceTree = "<group>"; };
 		F6100001A1B2C3D4E5F60718 /* WorkspaceRemoteConnectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceRemoteConnectionTests.swift; sourceTree = "<group>"; };
 		F7000001A1B2C3D4E5F60718 /* WorkspaceContentViewVisibilityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceContentViewVisibilityTests.swift; sourceTree = "<group>"; };
+		F73543E1FE38D566F501FD8A /* SyncSessionScheduler.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SyncSessionScheduler.swift; sourceTree = "<group>"; };
 		F8000001A1B2C3D4E5F60718 /* SocketControlPasswordStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SocketControlPasswordStoreTests.swift; sourceTree = "<group>"; };
 		F9000001A1B2C3D4E5F60718 /* GhosttyEnsureFocusWindowActivationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhosttyEnsureFocusWindowActivationTests.swift; sourceTree = "<group>"; };
 		FA000001A1B2C3D4E5F60718 /* WorkspaceStressProfileTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceStressProfileTests.swift; sourceTree = "<group>"; };
@@ -518,6 +520,7 @@
 				30889EB125FCBA69CDC6F03E /* ScheduleNextSyncSheet.swift */,
 				3D1E8633F62B90ED495A5C6D /* SyncingActionBar.swift */,
 				1C25D86B86815BD60D180047 /* AgentStateEmitter.swift */,
+				F73543E1FE38D566F501FD8A /* SyncSessionScheduler.swift */,
 			);
 			name = Async;
 			path = Async;
@@ -1014,6 +1017,7 @@
 				786EB5A6E3B7A6C1D854897E /* ScheduleNextSyncSheet.swift in Sources */,
 				A46C8E244440CABCA9FBD150 /* SyncingActionBar.swift in Sources */,
 				76329A90011CEE782F8838B3 /* AgentStateEmitter.swift in Sources */,
+				518EF0CC4F72CA1001180E8A /* SyncSessionScheduler.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

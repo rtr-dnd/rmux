@@ -5577,6 +5577,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         if let tabManagerSnapshot = sessionWindowSnapshot?.tabManager {
             tabManager.restoreSessionSnapshot(tabManagerSnapshot)
         }
+        // Register with the rmux Async scheduler so `selfRunning` workspaces
+        // in this window get their phase transition when nextSyncAt arrives.
+        SyncSessionScheduler.shared.register(tabManager)
 
         let sidebarWidth = sessionWindowSnapshot?.sidebar.width
             .map(SessionPersistencePolicy.sanitizedSidebarWidth)
