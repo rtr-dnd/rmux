@@ -1391,6 +1391,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         self.tabManager = tabManager
         self.notificationStore = notificationStore
         self.sidebarState = sidebarState
+        // Primary TabManager is created by cmuxApp.swift's StateObject, not
+        // `createMainWindow`, so register it here too to ensure the Async
+        // scheduler sees it from first launch.
+        SyncSessionScheduler.shared.register(tabManager)
         disableSuddenTerminationIfNeeded()
         installLifecycleSnapshotObserversIfNeeded()
         prepareStartupSessionSnapshotIfNeeded()
@@ -6351,8 +6355,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 try workspace.transition(.convertToAsync(initialPhase: .selfRunning, nextSyncAt: fireAt))
             case (.async, .awaitingAttendance), (.async, .selfRunning):
                 try workspace.transition(.reschedule(nextSyncAt: fireAt))
-            case (.async, .preparing), (.async, .syncing), (.async, nil):
-                NSLog("[rmux debug] cannot arm from phase \(String(describing: workspace.asyncPhase))")
+            case (.async, .syncing):
+                // End the current sync and set nextSyncAt 5 s out so we can
+                // observe the scheduler's fire path.
+                try workspace.transition(.endSyncing(nextSyncAt: fireAt, at: Date()))
+            case (.async, .preparing):
+                try workspace.transition(.enterSyncing(plannedDuration: 1, at: Date()))
+                try workspace.transition(.endSyncing(nextSyncAt: fireAt, at: Date()))
+            case (.async, nil):
+                NSLog("[rmux debug] cannot arm: Async workspace with nil phase")
             }
         } catch {
             NSLog("[rmux debug] arm in 5s failed: \(error)")

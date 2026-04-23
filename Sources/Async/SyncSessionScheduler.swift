@@ -1,4 +1,5 @@
 import AppKit
+import Bonsplit
 import Combine
 import Foundation
 import UserNotifications
@@ -34,12 +35,20 @@ final class SyncSessionScheduler {
     /// scheduler. Idempotent per instance.
     func register(_ tabManager: TabManager) {
         compactRegistrations()
-        if registeredTabManagers.contains(where: { $0.value === tabManager }) { return }
+        if registeredTabManagers.contains(where: { $0.value === tabManager }) {
+            #if DEBUG
+            dlog("rmux.scheduler.register skip=alreadyRegistered tabs=\(tabManager.tabs.count)")
+            #endif
+            return
+        }
         registeredTabManagers.append(Weak(tabManager))
         let cancellable = tabManager.$tabs.sink { [weak self] _ in
             Task { @MainActor [weak self] in self?.rescan() }
         }
         tabManagerCancellables.append(cancellable)
+        #if DEBUG
+        dlog("rmux.scheduler.register tabs=\(tabManager.tabs.count) totalRegistered=\(registeredTabManagers.count)")
+        #endif
         rescan()
     }
 
@@ -69,6 +78,10 @@ final class SyncSessionScheduler {
             return (ws, nextAt)
         }
 
+        #if DEBUG
+        dlog("rmux.scheduler.rescan workspaces=\(allWorkspaces.count) pending=\(pendingTargets.count)")
+        #endif
+
         guard let (nextWorkspace, nextAt) = pendingTargets.min(by: { $0.1 < $1.1 }) else {
             cancelTimer()
             return
@@ -81,7 +94,12 @@ final class SyncSessionScheduler {
 
     private func arm(workspace: Workspace, at date: Date) {
         // Already armed for this exact target → skip re-creating the timer.
-        if armedWorkspaceID == workspace.id, armedFireDate == date { return }
+        if armedWorkspaceID == workspace.id, armedFireDate == date {
+            #if DEBUG
+            dlog("rmux.scheduler.arm skip=alreadyArmed workspace=\(workspace.id.uuidString.prefix(8)) at=\(date)")
+            #endif
+            return
+        }
         cancelTimer()
 
         let delay = max(0, date.timeIntervalSinceNow)
@@ -98,6 +116,9 @@ final class SyncSessionScheduler {
         timer = source
         armedWorkspaceID = workspaceID
         armedFireDate = date
+        #if DEBUG
+        dlog("rmux.scheduler.arm workspace=\(workspace.id.uuidString.prefix(8)) at=\(date) delay=\(delay)s")
+        #endif
     }
 
     private func cancelTimer() {
@@ -108,6 +129,9 @@ final class SyncSessionScheduler {
     }
 
     private func fire(for workspaceID: UUID) {
+        #if DEBUG
+        dlog("rmux.scheduler.fire workspace=\(workspaceID.uuidString.prefix(8))")
+        #endif
         // Re-resolve the workspace (it could have been released or its phase
         // moved on since the timer armed).
         compactRegistrations()
@@ -115,17 +139,30 @@ final class SyncSessionScheduler {
             .compactMap(\.value)
             .flatMap(\.tabs)
             .first(where: { $0.id == workspaceID })
-        guard let workspace = candidate,
-              workspace.mode == .async,
-              workspace.asyncPhase == .selfRunning else {
+        guard let workspace = candidate else {
+            #if DEBUG
+            dlog("rmux.scheduler.fire skip=workspaceGone")
+            #endif
+            rescan()
+            return
+        }
+        guard workspace.mode == .async, workspace.asyncPhase == .selfRunning else {
+            #if DEBUG
+            dlog("rmux.scheduler.fire skip=phaseMoved mode=\(workspace.mode.rawValue) phase=\(workspace.asyncPhase?.rawValue ?? "nil")")
+            #endif
             rescan()
             return
         }
         do {
             try workspace.transition(.markAwaitingAttendance)
             postNotification(for: workspace)
+            #if DEBUG
+            dlog("rmux.scheduler.fire success transition+notification posted")
+            #endif
         } catch {
-            NSLog("[rmux scheduler] failed transition for \(workspace.id.uuidString): \(error)")
+            #if DEBUG
+            dlog("rmux.scheduler.fire failed transition error=\(error)")
+            #endif
         }
         rescan()
     }
