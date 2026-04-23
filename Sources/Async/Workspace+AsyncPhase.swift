@@ -131,11 +131,12 @@ extension Workspace {
             }
         }
 
-        // Notify the agent-facing contracts. Template seeding runs only when
-        // the workspace has just become Async (idempotent, so every transition
-        // can call it without harm).
+        // Notify the agent-facing contracts. Template seeding + hook
+        // installation run only while the workspace is Async (both are
+        // idempotent, so every transition can call them without harm).
         if mode == .async {
             AgentStateEmitter.ensureTemplate(for: self)
+            AgentStateEmitter.ensureClaudeCodeHook(for: self)
         }
         AgentStateEmitter.writeState(for: self)
         _ = reason  // kept for future telemetry / logging

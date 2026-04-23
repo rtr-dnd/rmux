@@ -79,6 +79,187 @@ enum AgentStateEmitter {
         )
     }
 
+    /// Install the Claude Code `UserPromptSubmit` hook that reads
+    /// `.cmux/state.json` and prepends a `[cmux] ...` status line to every
+    /// user turn. Writes `.cmux/prompt-hook.sh` (executable) and merges an
+    /// entry into `.claude/settings.json`.
+    ///
+    /// Idempotent: if an entry already references `.cmux/prompt-hook.sh`
+    /// anywhere in `UserPromptSubmit`, no change is made. The script file is
+    /// always rewritten so shell logic upgrades land automatically.
+    @MainActor
+    static func ensureClaudeCodeHook(for workspace: Workspace) {
+        let cwd = workspace.currentDirectory
+        guard !cwd.isEmpty else { return }
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        if cwd == home { return }
+
+        writePromptHookScript(in: cwd)
+        mergeClaudeSettings(in: cwd)
+    }
+
+    // MARK: - Hook script
+
+    @MainActor
+    private static func writePromptHookScript(in cwd: String) {
+        let dir = (cwd as NSString).appendingPathComponent(".cmux")
+        let path = (dir as NSString).appendingPathComponent("prompt-hook.sh")
+        do {
+            try FileManager.default.createDirectory(
+                atPath: dir,
+                withIntermediateDirectories: true,
+                attributes: nil
+            )
+            try promptHookScriptContent.write(
+                toFile: path,
+                atomically: true,
+                encoding: .utf8
+            )
+            try FileManager.default.setAttributes(
+                [.posixPermissions: NSNumber(value: 0o755)],
+                ofItemAtPath: path
+            )
+        } catch {
+            return
+        }
+    }
+
+    @MainActor
+    private static func mergeClaudeSettings(in cwd: String) {
+        let dir = (cwd as NSString).appendingPathComponent(".claude")
+        let path = (dir as NSString).appendingPathComponent("settings.json")
+        let absoluteHookPath = (cwd as NSString).appendingPathComponent(".cmux/prompt-hook.sh")
+
+        do {
+            try FileManager.default.createDirectory(
+                atPath: dir,
+                withIntermediateDirectories: true,
+                attributes: nil
+            )
+        } catch {
+            return
+        }
+
+        var root: [String: Any] = [:]
+        if let data = FileManager.default.contents(atPath: path),
+           let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            root = parsed
+        }
+
+        var hooks = root["hooks"] as? [String: Any] ?? [:]
+        var entries = hooks["UserPromptSubmit"] as? [[String: Any]] ?? []
+
+        // Skip if any existing entry already points at .cmux/prompt-hook.sh —
+        // lets the user customise or move the hook and have cmux respect it.
+        let alreadyRegistered = entries.contains { entry -> Bool in
+            guard let subHooks = entry["hooks"] as? [[String: Any]] else { return false }
+            return subHooks.contains { sub in
+                guard let command = sub["command"] as? String else { return false }
+                return command.hasSuffix(".cmux/prompt-hook.sh") || command == absoluteHookPath
+            }
+        }
+        if alreadyRegistered { return }
+
+        let newEntry: [String: Any] = [
+            "matcher": ".*",
+            "hooks": [
+                [
+                    "type": "command",
+                    "command": absoluteHookPath,
+                ] as [String: Any],
+            ],
+        ]
+        entries.append(newEntry)
+        hooks["UserPromptSubmit"] = entries
+        root["hooks"] = hooks
+
+        guard let payload = try? JSONSerialization.data(
+            withJSONObject: root,
+            options: [.sortedKeys, .prettyPrinted]
+        ) else { return }
+        let tmpPath = path + ".tmp"
+        do {
+            try payload.write(to: URL(fileURLWithPath: tmpPath), options: [.atomic])
+            try? FileManager.default.removeItem(atPath: path)
+            try FileManager.default.moveItem(atPath: tmpPath, toPath: path)
+        } catch {
+            try? FileManager.default.removeItem(atPath: tmpPath)
+        }
+    }
+
+    // MARK: - Shell script body
+
+    /// Contents of `.cmux/prompt-hook.sh`. Reads `.cmux/state.json` and emits
+    /// `[cmux] ...` lines per spec §7.3.2. Depends on `bash` and `jq`; when
+    /// `jq` is missing it emits a single informational line and exits 0.
+    private static let promptHookScriptContent: String = """
+    #!/bin/bash
+    # rmux UserPromptSubmit hook — managed by rmux.
+    # Reads .cmux/state.json and emits "[cmux] …" lines describing the
+    # current Async workspace phase so Claude Code can prepend them to every
+    # user turn. See docs-rmux/spec.md §7.3.2.
+    set -eu
+
+    STATE_FILE="${CMUX_STATE_FILE:-.cmux/state.json}"
+    [ -r "$STATE_FILE" ] || exit 0
+
+    if ! command -v jq >/dev/null 2>&1; then
+      echo "[cmux] phase=unknown (install jq — 'brew install jq' — for phase-aware hook output)"
+      exit 0
+    fi
+
+    format_hms() {
+      # integer seconds → HH:MM:SS
+      local total=${1:-0}
+      [[ "$total" =~ ^[0-9]+$ ]] || total=0
+      printf "%02d:%02d:%02d" $((total/3600)) $(((total%3600)/60)) $((total%60))
+    }
+
+    phase=$(jq -r '.phase // "unknown"' "$STATE_FILE")
+
+    case "$phase" in
+      syncing)
+        plannedSec=$(jq -r '.syncing.plannedDurationSeconds // 0' "$STATE_FILE")
+        elapsedSec=$(jq -r '.syncing.elapsedSeconds // 0' "$STATE_FILE")
+        overrunSec=$(jq -r '.syncing.overrunSeconds // 0' "$STATE_FILE")
+        planned=$(format_hms "$plannedSec")
+        elapsed=$(format_hms "$elapsedSec")
+        if [ "$overrunSec" -gt 0 ] 2>/dev/null; then
+          over=$(format_hms "$overrunSec")
+          echo "[cmux] phase=syncing elapsed=$elapsed planned=$planned over=$over"
+          echo "[cmux] Time is up. Wrap up and end the sync."
+        else
+          remaining=$(format_hms $((plannedSec - elapsedSec)))
+          echo "[cmux] phase=syncing elapsed=$elapsed planned=$planned remaining=$remaining"
+          echo "[cmux] Surface permission gaps & blocking questions now. Self-running starts when this sync ends."
+        fi
+        ;;
+      selfRunning)
+        nextAt=$(jq -r '.selfRunning.nextSyncAt // "unknown"' "$STATE_FILE")
+        remSec=$(jq -r '.selfRunning.remainingSeconds // 0' "$STATE_FILE")
+        remaining=$(format_hms "$remSec")
+        echo "[cmux] phase=self-running next_sync=$nextAt remaining=$remaining"
+        echo "[cmux] Human is not watching. Don't ask clarifying questions; log them for next sync."
+        ;;
+      awaitingAttendance)
+        scheduled=$(jq -r '.awaitingAttendance.scheduledAt // "unknown"' "$STATE_FILE")
+        overdueSec=$(jq -r '.awaitingAttendance.overdueSeconds // 0' "$STATE_FILE")
+        overdue=$(format_hms "$overdueSec")
+        echo "[cmux] phase=awaiting-attendance scheduled=$scheduled overdue=$overdue"
+        echo "[cmux] Scheduled sync time has passed; human not yet here. Continue as before."
+        ;;
+      preparing)
+        echo "[cmux] phase=preparing"
+        echo "[cmux] Sync is about to start; summarize progress and banked questions."
+        ;;
+      *)
+        # Unknown phase — stay silent so the agent isn't spammed with noise.
+        ;;
+    esac
+
+    exit 0
+    """
+
     // MARK: - Payload
 
     @MainActor

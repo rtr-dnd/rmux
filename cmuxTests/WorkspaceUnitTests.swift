@@ -5041,6 +5041,87 @@ final class AgentStateEmitterTests: XCTestCase {
         XCTAssertEqual(body, "custom user content")
     }
 
+    // MARK: Claude Code hook installation
+
+    func testConvertToAsyncInstallsPromptHookScriptAsExecutable() throws {
+        let w = makeWorkspace()
+        try w.transition(.convertToAsync(initialPhase: .preparing, nextSyncAt: nil))
+
+        let hook = tempRoot.appendingPathComponent(".cmux/prompt-hook.sh")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: hook.path))
+        let attrs = try FileManager.default.attributesOfItem(atPath: hook.path)
+        let perms = try XCTUnwrap(attrs[.posixPermissions] as? NSNumber).uint16Value
+        XCTAssertEqual(perms & 0o100, 0o100, "owner-execute bit should be set")
+    }
+
+    func testConvertToAsyncMergesClaudeSettings() throws {
+        let w = makeWorkspace()
+        try w.transition(.convertToAsync(initialPhase: .preparing, nextSyncAt: nil))
+
+        let settings = tempRoot.appendingPathComponent(".claude/settings.json")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: settings.path))
+        let data = try Data(contentsOf: settings)
+        let root = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let hooks = try XCTUnwrap(root["hooks"] as? [String: Any])
+        let entries = try XCTUnwrap(hooks["UserPromptSubmit"] as? [[String: Any]])
+        XCTAssertEqual(entries.count, 1)
+        let subHooks = try XCTUnwrap(entries[0]["hooks"] as? [[String: Any]])
+        let command = try XCTUnwrap(subHooks.first?["command"] as? String)
+        XCTAssertTrue(command.hasSuffix(".cmux/prompt-hook.sh"))
+    }
+
+    func testHookMergePreservesExistingUserHooks() throws {
+        let settings = tempRoot.appendingPathComponent(".claude/settings.json")
+        try FileManager.default.createDirectory(
+            at: settings.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        let existing: [String: Any] = [
+            "hooks": [
+                "UserPromptSubmit": [
+                    [
+                        "matcher": ".*",
+                        "hooks": [
+                            ["type": "command", "command": "/usr/local/bin/user-hook.sh"],
+                        ],
+                    ],
+                ],
+            ],
+        ]
+        let data = try JSONSerialization.data(withJSONObject: existing)
+        try data.write(to: settings)
+
+        let w = makeWorkspace()
+        try w.transition(.convertToAsync(initialPhase: .preparing, nextSyncAt: nil))
+
+        let updatedData = try Data(contentsOf: settings)
+        let updated = try XCTUnwrap(try JSONSerialization.jsonObject(with: updatedData) as? [String: Any])
+        let hooks = try XCTUnwrap(updated["hooks"] as? [String: Any])
+        let entries = try XCTUnwrap(hooks["UserPromptSubmit"] as? [[String: Any]])
+        XCTAssertEqual(entries.count, 2, "should append the rmux entry without dropping the user's")
+        let allCommands = entries.flatMap { entry -> [String] in
+            let subHooks = entry["hooks"] as? [[String: Any]] ?? []
+            return subHooks.compactMap { $0["command"] as? String }
+        }
+        XCTAssertTrue(allCommands.contains("/usr/local/bin/user-hook.sh"))
+        XCTAssertTrue(allCommands.contains(where: { $0.hasSuffix(".cmux/prompt-hook.sh") }))
+    }
+
+    func testHookMergeIsIdempotent() throws {
+        let w = makeWorkspace()
+        try w.transition(.convertToAsync(initialPhase: .preparing, nextSyncAt: nil))
+        // Trigger another transition that calls ensureClaudeCodeHook again.
+        try w.transition(.enterSyncing(plannedDuration: 300, at: Date()))
+
+        let settings = tempRoot.appendingPathComponent(".claude/settings.json")
+        let data = try Data(contentsOf: settings)
+        let root = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let entries = try XCTUnwrap(
+            (root["hooks"] as? [String: Any])?["UserPromptSubmit"] as? [[String: Any]]
+        )
+        XCTAssertEqual(entries.count, 1, "repeated transitions must not duplicate the rmux hook")
+    }
+
     // MARK: home-directory safety guard
 
     func testWriteStateSkipsWhenCwdEqualsHome() throws {
