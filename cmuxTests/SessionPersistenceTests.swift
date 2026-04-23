@@ -2151,3 +2151,143 @@ final class SidebarDragFailsafePolicyTests: XCTestCase {
         )
     }
 }
+
+// MARK: - rmux Async workspace persistence (schema v2)
+// Covers docs-rmux/plan.md §3 (v1→v2 migration, past-due correction).
+
+@MainActor
+final class AsyncWorkspacePersistenceTests: XCTestCase {
+
+    // MARK: makeSessionSnapshot / restoreSessionSnapshot roundtrip
+
+    func testNormalWorkspaceOmitsAsyncFieldsInSnapshot() {
+        let workspace = Workspace()
+        let snapshot = workspace.sessionSnapshot(includeScrollback: false)
+        XCTAssertNil(snapshot.mode)
+        XCTAssertNil(snapshot.asyncPhase)
+        XCTAssertNil(snapshot.nextSyncAt)
+        XCTAssertNil(snapshot.syncStartedAt)
+        XCTAssertNil(snapshot.plannedDuration)
+        XCTAssertNil(snapshot.lastSyncEndedAt)
+    }
+
+    func testSyncingWorkspaceRoundtripsThroughSnapshot() throws {
+        let source = Workspace()
+        try source.transition(.convertToAsync(initialPhase: .preparing, nextSyncAt: nil))
+        let startedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        try source.transition(.enterSyncing(plannedDuration: 1800, at: startedAt))
+
+        let snapshot = source.sessionSnapshot(includeScrollback: false)
+        XCTAssertEqual(snapshot.mode, "async")
+        XCTAssertEqual(snapshot.asyncPhase, "syncing")
+        XCTAssertEqual(snapshot.syncStartedAt, startedAt)
+        XCTAssertEqual(snapshot.plannedDuration, 1800)
+        XCTAssertNil(snapshot.nextSyncAt)
+
+        let destination = Workspace()
+        destination.restoreSessionSnapshot(snapshot)
+        XCTAssertEqual(destination.mode, .async)
+        XCTAssertEqual(destination.asyncPhase, .syncing)
+        XCTAssertEqual(destination.syncStartedAt, startedAt)
+        XCTAssertEqual(destination.plannedDuration, 1800)
+        XCTAssertNil(destination.nextSyncAt)
+    }
+
+    func testSelfRunningWorkspaceRoundtripsThroughSnapshot() throws {
+        let source = Workspace()
+        let future = Date(timeIntervalSinceNow: 7200)
+        try source.transition(.convertToAsync(initialPhase: .selfRunning, nextSyncAt: future))
+
+        let snapshot = source.sessionSnapshot(includeScrollback: false)
+        XCTAssertEqual(snapshot.mode, "async")
+        XCTAssertEqual(snapshot.asyncPhase, "selfRunning")
+        XCTAssertEqual(snapshot.nextSyncAt, future)
+
+        let destination = Workspace()
+        destination.restoreSessionSnapshot(snapshot)
+        XCTAssertEqual(destination.mode, .async)
+        XCTAssertEqual(destination.asyncPhase, .selfRunning)
+        XCTAssertEqual(destination.nextSyncAt, future)
+    }
+
+    func testRestoreWithMissingAsyncFieldsYieldsNormalWorkspace() {
+        let workspace = Workspace()
+        var snapshot = workspace.sessionSnapshot(includeScrollback: false)
+        // Simulate a v1 snapshot: explicitly wipe any async fields.
+        snapshot.mode = nil
+        snapshot.asyncPhase = nil
+        snapshot.nextSyncAt = nil
+        snapshot.syncStartedAt = nil
+        snapshot.plannedDuration = nil
+        snapshot.lastSyncEndedAt = nil
+
+        let destination = Workspace()
+        destination.restoreSessionSnapshot(snapshot)
+        XCTAssertEqual(destination.mode, .normal)
+        XCTAssertNil(destination.asyncPhase)
+        XCTAssertNil(destination.nextSyncAt)
+    }
+
+    // MARK: past-due correction
+
+    func testPastDuePolicyMovesSelfRunningToAwaitingAttendance() throws {
+        let workspace = Workspace()
+        let pastDue = Date(timeIntervalSinceNow: -60)
+        try workspace.transition(.convertToAsync(initialPhase: .selfRunning, nextSyncAt: pastDue))
+
+        let windowSnapshot = Self.windowSnapshot(containing: workspace.sessionSnapshot(includeScrollback: false))
+        let app = AppSessionSnapshot(version: 2, createdAt: 0, windows: [windowSnapshot])
+
+        let adjusted = SessionPersistenceStore.applyAsyncPastDueCorrection(app, now: Date())
+        XCTAssertEqual(adjusted.windows.first?.tabManager.workspaces.first?.asyncPhase, "awaitingAttendance")
+        XCTAssertEqual(adjusted.windows.first?.tabManager.workspaces.first?.nextSyncAt, pastDue)
+    }
+
+    func testPastDuePolicyLeavesFutureScheduleAlone() throws {
+        let workspace = Workspace()
+        let future = Date(timeIntervalSinceNow: 3600)
+        try workspace.transition(.convertToAsync(initialPhase: .selfRunning, nextSyncAt: future))
+
+        let windowSnapshot = Self.windowSnapshot(containing: workspace.sessionSnapshot(includeScrollback: false))
+        let app = AppSessionSnapshot(version: 2, createdAt: 0, windows: [windowSnapshot])
+
+        let adjusted = SessionPersistenceStore.applyAsyncPastDueCorrection(app, now: Date())
+        XCTAssertEqual(adjusted.windows.first?.tabManager.workspaces.first?.asyncPhase, "selfRunning")
+    }
+
+    func testPastDuePolicyIgnoresNonAsyncWorkspaces() {
+        // Normal workspaces (mode == nil / "normal") must not be touched even if
+        // some phantom nextSyncAt leaks through.
+        let workspace = Workspace()
+        var ws = workspace.sessionSnapshot(includeScrollback: false)
+        ws.mode = nil
+        ws.asyncPhase = "selfRunning"  // phantom — should be ignored
+        ws.nextSyncAt = Date(timeIntervalSinceNow: -60)
+
+        let windowSnapshot = Self.windowSnapshot(containing: ws)
+        let app = AppSessionSnapshot(version: 2, createdAt: 0, windows: [windowSnapshot])
+
+        let adjusted = SessionPersistenceStore.applyAsyncPastDueCorrection(app, now: Date())
+        // phase stays as written because mode isn't "async".
+        XCTAssertEqual(adjusted.windows.first?.tabManager.workspaces.first?.asyncPhase, "selfRunning")
+    }
+
+    // MARK: - schema version acceptance
+
+    func testSchemaVersionAcceptanceRangeCoversV1AndV2() {
+        XCTAssertTrue(SessionSnapshotSchema.supportedVersions.contains(1))
+        XCTAssertTrue(SessionSnapshotSchema.supportedVersions.contains(2))
+        XCTAssertEqual(SessionSnapshotSchema.currentVersion, 2)
+    }
+
+    // MARK: helpers
+
+    private static func windowSnapshot(containing ws: SessionWorkspaceSnapshot) -> SessionWindowSnapshot {
+        SessionWindowSnapshot(
+            frame: nil,
+            display: nil,
+            tabManager: SessionTabManagerSnapshot(selectedWorkspaceIndex: 0, workspaces: [ws]),
+            sidebar: SessionSidebarSnapshot(isVisible: true, selection: .tabs, width: nil)
+        )
+    }
+}

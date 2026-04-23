@@ -3,7 +3,14 @@ import Foundation
 import Bonsplit
 
 enum SessionSnapshotSchema {
-    static let currentVersion = 1
+    /// Version written for newly-saved snapshots. Incremented when new required
+    /// fields appear. Older versions are still accepted on load as long as their
+    /// number is in `supportedVersions` — all new fields are optional so Swift's
+    /// default `Codable` fills them with `nil` when missing.
+    static let currentVersion = 2
+    /// Versions the loader will accept. Keep the range narrow; drop entries only
+    /// after a grace period for existing users.
+    static let supportedVersions: ClosedRange<Int> = 1...2
 }
 
 enum SessionPersistencePolicy {
@@ -343,6 +350,17 @@ struct SessionWorkspaceSnapshot: Codable, Sendable {
     var logEntries: [SessionLogEntrySnapshot]
     var progress: SessionProgressSnapshot?
     var gitBranch: SessionGitBranchSnapshot?
+
+    // MARK: rmux Async workspace state (schema v2+)
+    //
+    // All optional so v1 snapshots decode with these as `nil`. A `nil` `mode`
+    // is interpreted as `.normal`. See docs-rmux/spec.md §2.2 for invariants.
+    var mode: String?
+    var asyncPhase: String?
+    var nextSyncAt: Date?
+    var syncStartedAt: Date?
+    var plannedDuration: TimeInterval?
+    var lastSyncEndedAt: Date?
 }
 
 struct SessionTabManagerSnapshot: Codable, Sendable {
@@ -369,9 +387,34 @@ enum SessionPersistenceStore {
         guard let data = try? Data(contentsOf: fileURL) else { return nil }
         let decoder = JSONDecoder()
         guard let snapshot = try? decoder.decode(AppSessionSnapshot.self, from: data) else { return nil }
-        guard snapshot.version == SessionSnapshotSchema.currentVersion else { return nil }
+        guard SessionSnapshotSchema.supportedVersions.contains(snapshot.version) else { return nil }
         guard !snapshot.windows.isEmpty else { return nil }
-        return snapshot
+        return applyAsyncPastDueCorrection(snapshot, now: Date())
+    }
+
+    /// Rewrite any persisted Async workspace whose `selfRunning` `nextSyncAt`
+    /// has elapsed into `awaitingAttendance`. Matches spec.md §8.1 restoration
+    /// policy. Kept `internal` so tests can exercise it deterministically.
+    static func applyAsyncPastDueCorrection(
+        _ snapshot: AppSessionSnapshot,
+        now: Date
+    ) -> AppSessionSnapshot {
+        var adjusted = snapshot
+        adjusted.windows = adjusted.windows.map { window in
+            var w = window
+            w.tabManager.workspaces = w.tabManager.workspaces.map { ws in
+                var ws = ws
+                if ws.mode == "async",
+                   ws.asyncPhase == "selfRunning",
+                   let nextSyncAt = ws.nextSyncAt,
+                   nextSyncAt < now {
+                    ws.asyncPhase = "awaitingAttendance"
+                }
+                return ws
+            }
+            return w
+        }
+        return adjusted
     }
 
     @discardableResult

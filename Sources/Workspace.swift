@@ -332,7 +332,13 @@ extension Workspace {
             statusEntries: statusSnapshots,
             logEntries: logSnapshots,
             progress: progressSnapshot,
-            gitBranch: gitBranchSnapshot
+            gitBranch: gitBranchSnapshot,
+            mode: mode == .normal ? nil : mode.rawValue,
+            asyncPhase: asyncPhase?.rawValue,
+            nextSyncAt: nextSyncAt,
+            syncStartedAt: syncStartedAt,
+            plannedDuration: plannedDuration,
+            lastSyncEndedAt: lastSyncEndedAt
         )
     }
 
@@ -346,6 +352,17 @@ extension Workspace {
         if !normalizedCurrentDirectory.isEmpty {
             currentDirectory = normalizedCurrentDirectory
         }
+
+        // Restore rmux Async workspace state. Past-due correction (selfRunning
+        // with elapsed nextSyncAt → awaitingAttendance) is already applied at
+        // load time by `SessionPersistenceStore.applyAsyncPastDueCorrection`.
+        // Missing fields (v1 snapshots) default to the Normal workspace state.
+        mode = WorkspaceMode(rawValue: snapshot.mode ?? "normal") ?? .normal
+        asyncPhase = snapshot.asyncPhase.flatMap(AsyncPhase.init(rawValue:))
+        nextSyncAt = snapshot.nextSyncAt
+        syncStartedAt = snapshot.syncStartedAt
+        plannedDuration = snapshot.plannedDuration
+        lastSyncEndedAt = snapshot.lastSyncEndedAt
 
         let panelSnapshotsById = Dictionary(uniqueKeysWithValues: snapshot.panels.map { ($0.id, $0) })
         let leafEntries = restoreSessionLayout(snapshot.layout)
