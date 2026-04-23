@@ -37,7 +37,9 @@ enum AsyncPhaseTransition {
     case interruptToPreparing
     /// Awaiting-attendance → Preparing. User starts the overdue sync ("今すぐ開始").
     case startOverdueSession
-    /// Awaiting-attendance → Self-running. User reschedules ("リスケ").
+    /// Reschedule the next Sync to a new future date. Valid in both
+    /// `selfRunning` (user presses "スケジュール変更") and `awaitingAttendance`
+    /// (user presses "リスケ"); the resulting phase is always `selfRunning`.
     case reschedule(nextSyncAt: Date)
     /// Preparing → previous phase. Target is inferred from `nextSyncAt`:
     /// nil → revert to Normal; future → selfRunning; past → awaitingAttendance.

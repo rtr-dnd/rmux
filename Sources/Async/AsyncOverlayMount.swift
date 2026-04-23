@@ -283,8 +283,8 @@ struct AsyncPhaseOverlayRoot: View {
                 SelfRunningOverlay(
                     workspaceTitle: workspace.title,
                     nextSyncAt: nextSyncAt,
-                    onChangeSchedule: {
-                        // TODO(rmux Phase 1 Step 4): present ScheduleNextSyncSheet.
+                    onReschedule: { scheduled in
+                        try? workspace.transition(.reschedule(nextSyncAt: scheduled.at))
                     },
                     onSyncNow: {
                         try? workspace.transition(.interruptToPreparing)
@@ -299,8 +299,8 @@ struct AsyncPhaseOverlayRoot: View {
                     onStartNow: {
                         try? workspace.transition(.startOverdueSession)
                     },
-                    onReschedule: {
-                        // TODO(rmux Phase 1 Step 4): present ScheduleNextSyncSheet.
+                    onReschedule: { scheduled in
+                        try? workspace.transition(.reschedule(nextSyncAt: scheduled.at))
                     }
                 )
             }

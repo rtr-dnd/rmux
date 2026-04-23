@@ -101,7 +101,11 @@ extension Workspace {
             // nextSyncAt is preserved (in the past) for cancel inference.
 
         case .reschedule(let newNextSyncAt):
-            guard mode == .async, asyncPhase == .awaitingAttendance else {
+            // Accepts selfRunning (user tweaks future time) and awaitingAttendance
+            // (user re-schedules an overdue slot). Either way the result is a
+            // selfRunning phase anchored to the new future time.
+            guard mode == .async,
+                  asyncPhase == .awaitingAttendance || asyncPhase == .selfRunning else {
                 throw AsyncPhaseTransitionError.invalidSource(mode: mode, phase: asyncPhase)
             }
             guard newNextSyncAt > Date() else {

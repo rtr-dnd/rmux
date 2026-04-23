@@ -1,12 +1,15 @@
 import SwiftUI
 
 /// Overlay shown when an Async workspace is in the `awaitingAttendance` phase.
-/// See docs-rmux/spec.md §6.1.2 and plan.md §6.4. Phase 1 Step 3 shell.
+/// See docs-rmux/spec.md §6.1.2 and plan.md §6.4.
 struct OverdueOverlay: View {
     let workspaceTitle: String
     let scheduledAt: Date
     let onStartNow: () -> Void
-    let onReschedule: () -> Void
+    /// Invoked with the user's picked future time when "リスケ" is confirmed.
+    let onReschedule: (ScheduledSync) -> Void
+
+    @State private var isSchedulingSheetPresented = false
 
     var body: some View {
         VStack(spacing: 28) {
@@ -29,7 +32,9 @@ struct OverdueOverlay: View {
                 .foregroundStyle(.secondary)
 
             HStack(spacing: 12) {
-                Button("リスケ", action: onReschedule)
+                Button("リスケ") {
+                    isSchedulingSheetPresented = true
+                }
                 Button("今すぐ開始", action: onStartNow)
                     .buttonStyle(.borderedProminent)
             }
@@ -42,5 +47,17 @@ struct OverdueOverlay: View {
         .background(.regularMaterial)
         .contentShape(Rectangle())
         .onTapGesture {}
+        .sheet(isPresented: $isSchedulingSheetPresented) {
+            ScheduleNextSyncSheet(
+                initialDate: nil,  // overdue → don't pre-fill the past date
+                onConfirm: { scheduled in
+                    isSchedulingSheetPresented = false
+                    onReschedule(scheduled)
+                },
+                onCancel: {
+                    isSchedulingSheetPresented = false
+                }
+            )
+        }
     }
 }

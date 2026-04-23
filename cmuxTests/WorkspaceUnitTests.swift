@@ -4771,6 +4771,17 @@ final class AsyncPhaseTransitionTests: XCTestCase {
         XCTAssertEqual(w.nextSyncAt, new)
     }
 
+    func testRescheduleFromSelfRunningUpdatesNextSyncAt() throws {
+        let w = Workspace()
+        let original = Date(timeIntervalSinceNow: 3600)
+        try w.transition(.convertToAsync(initialPhase: .selfRunning, nextSyncAt: original))
+
+        let new = Date(timeIntervalSinceNow: 7200)
+        try w.transition(.reschedule(nextSyncAt: new))
+        XCTAssertEqual(w.asyncPhase, .selfRunning)
+        XCTAssertEqual(w.nextSyncAt, new)
+    }
+
     func testRescheduleRejectsPastDate() throws {
         let w = Workspace()
         try w.transition(.convertToAsync(initialPhase: .selfRunning, nextSyncAt: Date(timeIntervalSinceNow: -60)))

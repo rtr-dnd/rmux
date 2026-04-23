@@ -1,12 +1,16 @@
 import SwiftUI
 
 /// Overlay shown while an Async workspace is in the `selfRunning` phase.
-/// See docs-rmux/spec.md §6.1.1 and plan.md §6.3. Phase 1 Step 3 shell.
+/// See docs-rmux/spec.md §6.1.1 and plan.md §6.3.
 struct SelfRunningOverlay: View {
     let workspaceTitle: String
     let nextSyncAt: Date
-    let onChangeSchedule: () -> Void
+    /// Invoked with the user's picked time when "スケジュール変更" is confirmed.
+    let onReschedule: (ScheduledSync) -> Void
+    /// Invoked when the user taps "今すぐ Sync".
     let onSyncNow: () -> Void
+
+    @State private var isSchedulingSheetPresented = false
 
     var body: some View {
         VStack(spacing: 28) {
@@ -28,7 +32,9 @@ struct SelfRunningOverlay: View {
                 .foregroundStyle(.secondary)
 
             HStack(spacing: 12) {
-                Button("スケジュール変更", action: onChangeSchedule)
+                Button("スケジュール変更") {
+                    isSchedulingSheetPresented = true
+                }
                 Button("今すぐ Sync", action: onSyncNow)
                     .buttonStyle(.borderedProminent)
             }
@@ -41,9 +47,21 @@ struct SelfRunningOverlay: View {
         .background(.regularMaterial)
         .contentShape(Rectangle())
         .onTapGesture {}
+        .sheet(isPresented: $isSchedulingSheetPresented) {
+            ScheduleNextSyncSheet(
+                initialDate: nextSyncAt,
+                onConfirm: { scheduled in
+                    isSchedulingSheetPresented = false
+                    onReschedule(scheduled)
+                },
+                onCancel: {
+                    isSchedulingSheetPresented = false
+                }
+            )
+        }
     }
 
-    /// Formats a future interval as "2h 14m", "18m", or "1m" (floor).
+    /// Formats a future interval as "2h 14m", "18m", or "1分未満" (floor).
     /// Negative values (past) render as "0m" so the UI never shows negatives.
     static func formatRemaining(_ seconds: TimeInterval) -> String {
         let total = max(0, Int(seconds))
@@ -55,6 +73,6 @@ struct SelfRunningOverlay: View {
         if minutes > 0 {
             return "\(minutes)m"
         }
-        return "1m未満"
+        return "1分未満"
     }
 }
