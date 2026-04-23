@@ -6,27 +6,33 @@
 
 ## 現在の焦点
 
-Phase 1 の設計（spec.md / plan.md）が固まり、ハーネス（INDEX.md / CONVENTIONS.md / 本書 / agent-state.md）を整備した段階。**コード実装はこれから着手**。
+Phase 1 Step 1（データモデル）が完了。Step 2（永続化 v1→v2）に移る直前。
+
+実装済み（ブランチ `rmux/phase1/data-model`）:
+- トップレベル enum `WorkspaceMode` / `AsyncPhase` + transition 用補助 enum `AsyncPhaseTransition` / `AsyncPhaseTransitionError`（`Sources/Workspace.swift`）
+- `Workspace` に `@Published private(set)` の Async 状態フィールド 6 本
+- 遷移集約メソッド `Workspace.transition(_:reason:)`（全 9 遷移を 1 箇所で不変条件検証、後続ステップで `AgentStateEmitter` を呼び出す予定の `TODO` マーカー付き）
+- 派生ヘルパー `remainingUntilSync` / `overdueDuration` / `elapsedSinceSyncStart` / `syncOverrun`
+- `cmuxTests/WorkspaceUnitTests.swift` に `AsyncPhaseTransitionTests`（全 32 ケース、`xcodebuild ... test` で 0 failure）
 
 ---
 
 ## 次の具体アクション
 
-**`plan.md` §8 Step 1 — データモデルの追加** から始める。
+**`plan.md` §8 Step 2 — 永続化 v1→v2** に着手。
 
-1. `Sources/Workspace.swift` に以下を追加:
-   - `enum WorkspaceMode: String, Codable { case normal, async }`
-   - `enum AsyncPhase: String, Codable { case preparing, syncing, selfRunning, awaitingAttendance }`
-   - `@Published var mode: WorkspaceMode = .normal`
-   - `@Published var asyncPhase: AsyncPhase? = nil`
-   - `@Published var nextSyncAt: Date? = nil`
-   - `@Published var syncStartedAt: Date? = nil`
-   - `@Published var plannedDuration: TimeInterval? = nil`
-   - `@Published var lastSyncEndedAt: Date? = nil`
-2. 遷移集約メソッド `func transition(to newPhase: AsyncPhase, reason: String)` を生やす（不変条件バリデーション、`plan.md` §2.2）
-3. `var remainingUntilSync / overdueDuration / elapsedSinceSyncStart / syncOverrun` の computed property を追加（`plan.md` §2.3）
-4. ビルド確認: `./scripts/reload.sh --tag rmux-async-data-model`
-5. UI には何も出ない状態でビルドが通ればこのステップは完了
+1. `Sources/SessionPersistence.swift` の `SessionSnapshotSchema.currentVersion` を `1 → 2` に bump
+2. `SessionWorkspaceSnapshot` に optional フィールドを追加:
+   - `mode: String?`（欠損時は `"normal"` を注入）
+   - `asyncPhase: String?`
+   - `nextSyncAt: Date?`
+   - `syncStartedAt: Date?`
+   - `plannedDuration: TimeInterval?`
+   - `lastSyncEndedAt: Date?`
+3. `SessionWorkspaceLayoutSnapshot.init(from:)`（line 304 付近）の custom decoding パターンに倣って v1 JSON 互換性を確保
+4. 復元時の past-due 判定（spec.md §8.1）: `mode == .async` かつ `asyncPhase == .selfRunning` かつ `nextSyncAt < now` の場合、`awaitingAttendance` に書き換えて復元
+5. `SessionPersistenceTests.swift` に v1 snapshot の decode テストと past-due 書き換えテストを追加
+6. 検証: `xcodebuild -scheme cmux-unit -only-testing:cmuxTests/SessionPersistenceTests test`
 
 このステップでは永続化も UI もまだ触らない（ステップ 2, 3 で別途）。
 
@@ -34,7 +40,7 @@ Phase 1 の設計（spec.md / plan.md）が固まり、ハーネス（INDEX.md /
 
 ## Phase 1 ステップ進捗（plan.md §8）
 
-- [ ] 1. データモデル（`WorkspaceMode` / `AsyncPhase` / 新規 `@Published` / 遷移集約メソッド）
+- [x] 1. データモデル（`WorkspaceMode` / `AsyncPhase` / 新規 `@Published` / 遷移集約メソッド + 32 unit tests）
 - [ ] 2. 永続化 v1→v2（`SessionWorkspaceSnapshot` 拡張、past-due 復元ハンドリング）
 - [ ] 3. Preparing / Self-running / Awaiting overlay の殻（文言とボタンだけ、ZStack 組み込み、dev ショートカットで各フェーズにセット）
 - [ ] 4. スケジュール設定モーダル（§6.7、衝突チェックなし）
@@ -69,6 +75,13 @@ Phase 1 の設計（spec.md / plan.md）が固まり、ハーネス（INDEX.md /
 ## セッションログ
 
 新しいものを上に追記。
+
+### 2026-04-23 (Phase 1 Step 1 実装)
+- Branch `rmux/phase1/data-model` を `ritar/rmux-docs` から分岐
+- `Sources/Workspace.swift` に Async 関連の型定義（`WorkspaceMode` / `AsyncPhase` / `AsyncPhaseTransition` / `AsyncPhaseTransitionError`）、`Workspace` クラスへの `@Published private(set)` 状態フィールド 6 本、遷移集約メソッド `transition(_:reason:)`、派生ヘルパー 4 本を追加（+238 行）
+- `cmuxTests/WorkspaceUnitTests.swift` に `AsyncPhaseTransitionTests`（32 ケース、+344 行）を追記。新規ファイル作成は project.pbxproj 編集を避けるため既存ファイルに統合
+- `.claude/settings.local.json` の許可パターンを整備（中途 glob を廃し、プレフィックス + `:*` 形式で書き直し）。`git push:*` は deny、PR 作成・push は人間が行う運用に合意
+- Commits: `0c41da2c`（data model）、`e63f6462`（unit tests）。`xcodebuild` での cmux フルビルド成功、`cmux-unit` scheme の対象テスト 32/32 pass
 
 ### 2026-04-23 (設計 + ハーネス整備)
 - `docs-rmux/prompt.md`（原典ビジョン）を起点に、仕様と実装計画を構築。
