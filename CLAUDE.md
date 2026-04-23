@@ -1,4 +1,22 @@
-# cmux agent notes
+# rmux (fork of cmux) — agent notes
+
+> **This repo is rmux** (`rtr-dnd/rmux`), a fork of `manaflow-ai/cmux` with a "脳に優しいターミナル" vision layered on top. Upstream cmux agent notes (below) still apply for platform-level work — build, `reload.sh`, Ghostty submodule, testing, release. For anything rmux-specific, start from `docs-rmux/INDEX.md`.
+>
+> **rmux-specific docs (read in this order)**:
+> - `docs-rmux/INDEX.md` — ビジョン・用語・現在の Phase と次のアクション
+> - `docs-rmux/spec.md` — Async workspace / Sync session の理想挙動仕様
+> - `docs-rmux/plan.md` — Phase 1 MVP の実装計画 + Phase 2–5 ロードマップ
+> - `docs-rmux/CONVENTIONS.md` — rmux 固有のコード配置・用語・ローカライズ規約
+> - `docs-rmux/PROGRESS.md` — 実装進捗ログ（毎セッションで追記）
+> - `docs-rmux/agent-state.md` — Async workspace が吐き出す `.cmux/state.json` の公開スキーマ
+>
+> **Naming note**: コード識別子（バイナリ名、bundle ID、socket 名、derived data、Swift 識別子）は当面 `cmux` のまま。`rmux` はドキュメントと新規機能スコープ（`Sources/Async/` / ローカライズキー `async.*` など）でのみ使う。upstream マージの容易性を優先するため。
+>
+> **Reload tag**: rmux 開発では `./scripts/reload.sh --tag rmux-<feature>` を使う（上流 cmux を触る別エージェントと derived data / socket で衝突しないように）。
+>
+> **Docs are latest-only**: `spec.md` / `plan.md` / `INDEX.md` / `agent-state.md` には **最新の決定事項だけ** を書く。「以前は X だったが今は Y」のような履歴・変更経緯は一切残さない（文脈がリセットされた次のセッションから見るとノイズになるため）。方針が変わったらその場で書き換える。決着していない検討事項は `PROGRESS.md` §「仕様の未解決 / 揺れ」に一時的に置き、決着時に spec/plan へ昇格させて PROGRESS から消す。**永続的な設計判断の根拠（例: 「X を採用しない理由は Y」）は履歴ではないので残してよい**。
+
+---
 
 ## Initial setup
 
