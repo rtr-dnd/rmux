@@ -6337,6 +6337,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         sendTextWhenReady(command, to: tab)
     }
 
+    // Phase 1 Step 7 — arm the scheduler so it fires the macOS notification
+    // path in ~5 seconds from now on the selected workspace. If the workspace
+    // is still Normal we convert it to `selfRunning`; otherwise we reschedule
+    // to 5 s in the future (either phase accepts it now). The scheduler will
+    // then transition to `awaitingAttendance` and post the notification.
+    @objc func debugArmSyncNotificationInFiveSeconds(_ sender: Any?) {
+        guard let workspace = tabManager?.selectedWorkspace else { return }
+        let fireAt = Date().addingTimeInterval(5)
+        do {
+            switch (workspace.mode, workspace.asyncPhase) {
+            case (.normal, _):
+                try workspace.transition(.convertToAsync(initialPhase: .selfRunning, nextSyncAt: fireAt))
+            case (.async, .awaitingAttendance), (.async, .selfRunning):
+                try workspace.transition(.reschedule(nextSyncAt: fireAt))
+            case (.async, .preparing), (.async, .syncing), (.async, nil):
+                NSLog("[rmux debug] cannot arm from phase \(String(describing: workspace.asyncPhase))")
+            }
+        } catch {
+            NSLog("[rmux debug] arm in 5s failed: \(error)")
+        }
+    }
+
     // Phase 1 Step 3 — manual verification hook. Cycles the currently selected
     // workspace through the Async phase state machine so the overlays can be
     // eyeballed without needing a full create-flow UI yet.

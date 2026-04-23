@@ -321,6 +321,11 @@ struct cmuxApp: App {
                 }
                 .keyboardShortcut("p", modifiers: [.control, .option, .command])
 
+                Button("Arm Sync Notification in 5s") {
+                    appDelegate.debugArmSyncNotificationInFiveSeconds(nil)
+                }
+                .keyboardShortcut("n", modifiers: [.control, .option, .command])
+
                 Button("New Tab With Lorem Search Text") {
                     appDelegate.openDebugLoremTab(nil)
                 }
