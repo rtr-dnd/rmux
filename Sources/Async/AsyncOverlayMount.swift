@@ -100,9 +100,9 @@ struct AsyncOverlayMount: NSViewRepresentable {
             }
 
             let phase = workspace.mode == .async ? workspace.asyncPhase : nil
-            guard let phase, phase != .syncing else {
+            guard let phase else {
                 #if DEBUG
-                dlog("rmux.overlay.refresh detach phase=\(phase?.rawValue ?? "nil")")
+                dlog("rmux.overlay.refresh detach phase=nil (normal workspace)")
                 #endif
                 detachOverlay()
                 return
@@ -120,22 +120,51 @@ struct AsyncOverlayMount: NSViewRepresentable {
                 detachOverlay()
                 return
             }
-            let overlayScreenRect = window.convertToScreen(anchorRectInWindow)
 
-            // Decide which corners should follow the main window's rounded
-            // radius. Top corners are never rounded (title bar sits above).
-            // Bottom corners follow the main window only if the overlay is
-            // flush with that window edge (no sidebar / right panel in the way).
-            let cornerEdgeTolerance: CGFloat = 1
-            let touchesLeftEdge = anchorRectInWindow.minX <= cornerEdgeTolerance
-            let windowRightEdge = window.contentLayoutRect.maxX
-            let touchesRightEdge = abs(anchorRectInWindow.maxX - windowRightEdge) <= cornerEdgeTolerance
-            var mask: CACornerMask = []
-            if touchesLeftEdge { mask.insert(.layerMinXMaxYCorner) }
-            if touchesRightEdge { mask.insert(.layerMaxXMaxYCorner) }
+            // Two modes of overlay geometry:
+            //  - "fill": the overlay spans the whole workspace content area
+            //    (preparing / selfRunning / awaitingAttendance). Bottom corners
+            //    follow the main window's rounded radius, top corners stay square.
+            //  - "pill": during `syncing`, the terminal is foreground and the
+            //    overlay is a small floating chip anchored to the top-right
+            //    that hosts the "Sync を終える" affordance (future: elapsed-time
+            //    HUD in Step 9). All four corners rounded as a self-contained
+            //    pill; no mouse-passthrough needed because only the pill rect
+            //    is captured.
+            let overlayRectInWindow: CGRect
+            let mask: CACornerMask
+            switch phase {
+            case .syncing:
+                let pillSize = CGSize(width: 280, height: 44)
+                let padding: CGFloat = 12
+                // Window coordinates: AppKit bottom-left origin, so the top
+                // edge of the workspace content is at maxY.
+                overlayRectInWindow = CGRect(
+                    x: anchorRectInWindow.maxX - pillSize.width - padding,
+                    y: anchorRectInWindow.maxY - pillSize.height - padding,
+                    width: pillSize.width,
+                    height: pillSize.height
+                )
+                mask = [
+                    .layerMinXMinYCorner, .layerMaxXMinYCorner,
+                    .layerMinXMaxYCorner, .layerMaxXMaxYCorner,
+                ]
+            case .preparing, .selfRunning, .awaitingAttendance:
+                overlayRectInWindow = anchorRectInWindow
+                let cornerEdgeTolerance: CGFloat = 1
+                let touchesLeftEdge = anchorRectInWindow.minX <= cornerEdgeTolerance
+                let windowRightEdge = window.contentLayoutRect.maxX
+                let touchesRightEdge = abs(anchorRectInWindow.maxX - windowRightEdge) <= cornerEdgeTolerance
+                var m: CACornerMask = []
+                if touchesLeftEdge { m.insert(.layerMinXMaxYCorner) }
+                if touchesRightEdge { m.insert(.layerMaxXMaxYCorner) }
+                mask = m
+            }
+
+            let overlayScreenRect = window.convertToScreen(overlayRectInWindow)
 
             #if DEBUG
-            dlog("rmux.overlay.refresh mount phase=\(phase.rawValue) anchorRect=\(anchorRectInWindow) screenRect=\(overlayScreenRect) corners=left:\(touchesLeftEdge) right:\(touchesRightEdge)")
+            dlog("rmux.overlay.refresh mount phase=\(phase.rawValue) rectInWindow=\(overlayRectInWindow) screenRect=\(overlayScreenRect) corners=\(maskDescription(mask))")
             #endif
 
             let root = AsyncPhaseOverlayRoot(workspace: workspace, phase: phase)
@@ -305,7 +334,22 @@ struct AsyncPhaseOverlayRoot: View {
                 )
             }
         case .syncing:
-            EmptyView()
+            SyncingActionBar(
+                onEndSync: { scheduled in
+                    try? workspace.transition(.endSyncing(nextSyncAt: scheduled.at, at: Date()))
+                }
+            )
         }
     }
 }
+
+#if DEBUG
+private func maskDescription(_ mask: CACornerMask) -> String {
+    var parts: [String] = []
+    if mask.contains(.layerMinXMinYCorner) { parts.append("tl") }
+    if mask.contains(.layerMaxXMinYCorner) { parts.append("tr") }
+    if mask.contains(.layerMinXMaxYCorner) { parts.append("bl") }
+    if mask.contains(.layerMaxXMaxYCorner) { parts.append("br") }
+    return parts.isEmpty ? "none" : parts.joined(separator: "+")
+}
+#endif
