@@ -6,33 +6,31 @@
 
 ## 現在の焦点
 
-Phase 1 Step 1（データモデル）と Step 2（永続化 v1→v2）が完了。Step 3（overlay の殻 + WorkspaceContentView の ZStack 組み込み）に移る直前。
+Phase 1 Step 1–Step 8 完了。残りは HUD / 摩擦 / 通知抑制 / サイドバー / 作成 UI / ローカライズ（Step 9–14）。
 
 実装済み（ブランチ `rmux/phase1/data-model`）:
-- トップレベル enum / transition（`Sources/Async/AsyncPhase.swift`）+ extension（`Sources/Async/Workspace+AsyncPhase.swift`）
-- `Workspace` に Async 状態フィールド 6 本（`@Published var`、ミューテーションは `transition(_:reason:)` 経由と規約で強制）
-- 派生ヘルパー `remainingUntilSync` / `overdueDuration` / `elapsedSinceSyncStart` / `syncOverrun`
-- 永続化 schema v2（`SessionSnapshotSchema.currentVersion = 2`, `supportedVersions = 1...2`）、`SessionWorkspaceSnapshot` に Async optional 6 フィールド、`SessionPersistenceStore.applyAsyncPastDueCorrection(_:now:)` で past-due→awaitingAttendance 自動補正
-- `Workspace.sessionSnapshot(includeScrollback:)` と `restoreSessionSnapshot(_:)` が Async 状態を往復
-- ツール: `scripts/add-swift-file.sh` で新規 Swift ファイルを project.pbxproj に登録（冪等、冒頭でプレフィックス→target 自動判定）
-- 単体テスト: `AsyncPhaseTransitionTests`（32 ケース） + `AsyncWorkspacePersistenceTests`（8 ケース）、全 pass
+- **データモデル** — `WorkspaceMode` / `AsyncPhase` / `AsyncPhaseTransition` / `AsyncPhaseTransitionError` + `Workspace.transition(_:reason:)` + 派生ヘルパー 4 本。
+- **永続化 v2** — `SessionWorkspaceSnapshot` に Async 6 フィールド、`applyAsyncPastDueCorrection(_:now:)` で past-due 復元補正。
+- **Overlay** — `ReadyToSyncOverlay` / `SelfRunningOverlay` / `OverdueOverlay` / `SyncingActionBar` を `AsyncOverlayMount`（child window + 親連動 corner mask）で mount。
+- **スケジュール sheet** — `ScheduleNextSyncSheet` + `ScheduledSync` 構造体。quick-pick + 30 分粒度 DatePicker。`.reschedule` を selfRunning 起点も受け付けるように拡張。
+- **Sync 終了導線** — syncing 中は右上に「Sync を終える / 次回を予定…」pill、sheet 経由で `.endSyncing`。
+- **AgentStateEmitter** — `.cmux/state.json` 自動書き込み（schemaVersion 1、atomic）、`CLAUDE.async.md` を初回 Async 化で seed。`$HOME` 保護ガード。
+- **SyncSessionScheduler** — singleton。`TabManager.$tabs` / `Workspace.objectWillChange` を購読し、最近接 `nextSyncAt` に単一 `DispatchSourceTimer` を arm。発火で `.markAwaitingAttendance` + macOS 通知。
+- **Claude Code hook** — `.cmux/prompt-hook.sh`（bash + jq、fallback あり）+ `.claude/settings.json` の `UserPromptSubmit` に idempotent merge。既存 user hook を保持。
+- ツール: `scripts/add-swift-file.sh` で新規 Swift ファイルを `project.pbxproj` に登録。
+- 単体テスト: `AsyncPhaseTransitionTests`(33) + `AsyncWorkspacePersistenceTests`(8) + `AgentStateEmitterTests`(11) = **52 ケース、全 pass**。
 
 ---
 
 ## 次の具体アクション
 
-**`plan.md` §8 Step 3 — Preparing / Self-running / Awaiting overlay の殻** に着手。
+**`plan.md` §8 Step 9 — 経過時間 HUD** に着手。
 
-1. `./scripts/add-swift-file.sh Sources/Async/ReadyToSyncOverlay.swift`
-2. `./scripts/add-swift-file.sh Sources/Async/SelfRunningOverlay.swift`
-3. `./scripts/add-swift-file.sh Sources/Async/OverdueOverlay.swift`
-4. 各 overlay は SwiftUI `View`、ボタンと文言だけの最小実装（plan.md §6.2–6.4 参照）
-5. `Sources/WorkspaceContentView.swift` の body を `ZStack` 化し、フェーズに応じて overlay を最前面に被せる（plan.md §6.1 / spec.md §6.1）
-6. 動作確認用 dev ショートカットを一時的に仕込む（フェーズを手動切替できるように、Cmd+Opt+... 等）
-7. `./scripts/reload.sh --tag rmux-async-data-model --launch` で UI 確認（overlay が出る／ターミナルが unmount されない）
-8. screenshot を撮って視認（各フェーズで overlay が正しく表示されているか）
-
-このステップでは永続化も UI もまだ触らない（ステップ 2, 3 で別途）。
+1. 現状 `SyncingActionBar` はボタンのみ。ここに `TimelineView(.periodic(from: .now, by: 1))` で `HH:MM:SS / 予定 HH:MM:SS` を追加。
+2. `syncOverrun > 0` のとき、数字を赤化＋約 1 Hz の点滅アニメーション。超過時間も併記（`+HH:MM:SS`）。
+3. HUD を非表示にするトグルは作らない（spec §6.1.4 方針）。
+4. `AsyncOverlayMount` の syncing 時の pill サイズを HUD の幅に合わせて調整。
+5. 見た目の確認を tagged launch + `debug.rmux.cycle_async_phase` で行う。
 
 ---
 
@@ -40,12 +38,12 @@ Phase 1 Step 1（データモデル）と Step 2（永続化 v1→v2）が完了
 
 - [x] 1. データモデル（`WorkspaceMode` / `AsyncPhase` / 新規 `@Published` / 遷移集約メソッド + 32 unit tests）
 - [x] 2. 永続化 v1→v2（`SessionWorkspaceSnapshot` 拡張、past-due 復元ハンドリング + 8 unit tests）
-- [ ] 3. Preparing / Self-running / Awaiting overlay の殻（文言とボタンだけ、ZStack 組み込み、dev ショートカットで各フェーズにセット）
-- [ ] 4. スケジュール設定モーダル（§6.7、衝突チェックなし）
-- [ ] 5. Sync を終える導線（syncing 中だけ出るボタン → モーダル → self-running）
-- [ ] 6. `AgentStateEmitter`（環境変数 + state.json + `CLAUDE.async.md` 配布。hook はまだ）
-- [ ] 7. SyncSessionScheduler（最近接 `nextSyncAt` のタイマー + macOS 通知）
-- [ ] 8. Claude Code hook 配布（`.claude/settings.json` マージ + `.cmux/prompt-hook.sh`）
+- [x] 3. overlay の殻（child window + portal 回避 + 親窓連動 corner mask）
+- [x] 4. スケジュール設定モーダル（quick-pick + DatePicker、衝突チェック無し）
+- [x] 5. Sync を終える導線（syncing 中は右上に pill）
+- [x] 6. `AgentStateEmitter`（`.cmux/state.json` + `CLAUDE.async.md` + $HOME ガード + 11 unit tests）
+- [x] 7. SyncSessionScheduler（最近接 `nextSyncAt` の単一 DispatchSourceTimer + macOS 通知）
+- [x] 8. Claude Code hook 配布（`.cmux/prompt-hook.sh` + `.claude/settings.json` idempotent merge）
 - [ ] 9. 経過時間 HUD（syncing pill、超過赤点滅）
 - [ ] 10. 「今すぐ Sync」確認ダイアログ（yes/no 1 枚）
 - [ ] 11. 通知抑制（`TerminalNotificationStore` ゲート）
@@ -73,6 +71,16 @@ Phase 1 Step 1（データモデル）と Step 2（永続化 v1→v2）が完了
 ## セッションログ
 
 新しいものを上に追記。
+
+### 2026-04-24 (Phase 1 Step 3–8 実装)
+- **Step 3**: 3 つの overlay (`ReadyToSyncOverlay` / `SelfRunningOverlay` / `OverdueOverlay`) を新設。cmux のターミナル portal が SwiftUI ZStack の上に描画される問題を回避するため、`AsyncOverlayMount` 経由で **親ウィンドウに結び付けた子 NSWindow** に `NSHostingView` を載せる方式に落とし着く。親ウィンドウと連動した bottom-corner mask、サイドバー有無による左下 corner の出し分けを実装。Debug メニュー + ⌃⌥⌘P + socket 経由 (`debug.rmux.cycle_async_phase`) の 3 経路でフェーズ循環。
+- **Step 4**: `ScheduleNextSyncSheet` + `ScheduledSync` 構造体（Phase 3 で `calendarEventId` を生やすため値型に）。quick-pick（1h/3h/6h、7 日以内の 09:00/18:00）+ 30 分粒度 DatePicker。`.reschedule` transition を selfRunning 起点も受け付けるよう拡張 + 対応テスト追加。
+- **Step 5**: syncing 時は `SyncingActionBar` pill（右上、全 4 角丸）を表示。クリックで `ScheduleNextSyncSheet` → `.endSyncing`。
+- **Step 6**: `AgentStateEmitter` が Workspace.transition ごとに `.cmux/state.json` を atomic write。初回 Async 化時に `CLAUDE.async.md` をシード。$HOME cwd は安全のため書き込みスキップ（テスト汚染防止）。`AgentStateEmitterTests` 7 ケース pass。
+- **Step 7**: `SyncSessionScheduler` singleton。AppDelegate.createMainWindow で TabManager を register。`TabManager.$tabs` + `Workspace.objectWillChange` を購読し最近接 `selfRunning.nextSyncAt` に単一 `DispatchSourceTimer` を arm。発火で `.markAwaitingAttendance` + `UNUserNotificationCenter` 通知（タイトル「Sync の時間です」）。
+- **Step 8**: `.cmux/prompt-hook.sh`（bash + jq、jq 欠落時の fallback 付き）を実行権限付きで生成。`.claude/settings.json` の `hooks.UserPromptSubmit` に冪等 merge（既存の user hook を保持、rmux 自身の重複は検出してスキップ）。`AgentStateEmitterTests` に 4 ケース追加。
+- Commits (順): `3daa937c` (pill) → `2d738217` (emitter) → `f87e23c1` (scheduler) → `fd28468b` (hook)、直前の `a8384b3d` (sheet) と `d3a5f220` (overlay mount) を含め 6 本。
+- 全テスト: `AsyncPhaseTransitionTests`(33) + `AsyncWorkspacePersistenceTests`(8) + `AgentStateEmitterTests`(11) = 52 ケース、全 pass。
 
 ### 2026-04-23 (Phase 1 Step 2 実装 + Sources/Async/ リファクタ + pbxproj ツール)
 - Step 2（永続化 v1→v2）: `SessionSnapshotSchema.currentVersion` を 2 に上げ、`supportedVersions = 1...2` を導入。`SessionWorkspaceSnapshot` に Async optional 6 フィールドを追加。`applyAsyncPastDueCorrection(_:now:)` が selfRunning + 過去 `nextSyncAt` を awaitingAttendance に書き換える。`Workspace.sessionSnapshot(...)` / `restoreSessionSnapshot(_:)` が Async 状態を往復。
