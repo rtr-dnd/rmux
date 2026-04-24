@@ -95,8 +95,11 @@ struct MultiDayCalendarView: View {
                 ScrollView(.vertical, showsIndicators: true) {
                     HStack(alignment: .top, spacing: 0) {
                         hourColumn
-                        ForEach(visibleDays, id: \.self) { day in
-                            dayColumn(for: calendar.startOfDay(for: day))
+                        ForEach(Array(visibleDays.enumerated()), id: \.element) { index, day in
+                            dayColumn(
+                                for: calendar.startOfDay(for: day),
+                                isLastColumn: index == visibleDays.count - 1
+                            )
                         }
                         // Matches the width of the right chevron so the
                         // day columns in the grid line up under the day
@@ -214,7 +217,7 @@ struct MultiDayCalendarView: View {
 
     // MARK: - Day column
 
-    private func dayColumn(for dayStart: Date) -> some View {
+    private func dayColumn(for dayStart: Date, isLastColumn: Bool = false) -> some View {
         let slots = Self.slots(for: dayStart)
         let busy = busyByDay[dayStart] ?? []
         let now = Date()
@@ -292,6 +295,14 @@ struct MultiDayCalendarView: View {
                 .frame(maxHeight: .infinity),
             alignment: .leading
         )
+        .overlay(alignment: .trailing) {
+            if isLastColumn {
+                Rectangle()
+                    .fill(Color.primary.opacity(0.08))
+                    .frame(width: 0.5)
+                    .frame(maxHeight: .infinity)
+            }
+        }
     }
 
     // MARK: - Geometry helpers

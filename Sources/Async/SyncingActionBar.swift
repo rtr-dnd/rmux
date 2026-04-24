@@ -1,7 +1,9 @@
 import SwiftUI
 
-/// Compact pill rendered over the top-right of a workspace while it is in
-/// the `syncing` phase. Combines:
+/// HUD + "End Sync" affordance that lives in the window's titlebar right
+/// accessory while the workspace is `syncing`. No chrome of its own (no
+/// pill background, border, or shadow) so it blends into the titlebar.
+/// Combines:
 ///   - the elapsed-time HUD (`HH:MM:SS / 予定 HH:MM:SS`, with red flashing
 ///     overrun display — docs-rmux/plan.md §6.5 & spec.md §6.1.4), and
 ///   - the "Sync を終える / 次回を予定…" affordance that ends the session via
@@ -26,7 +28,7 @@ struct SyncingActionBar: View {
             // 1 Hz blink when over time: on at even seconds, dim at odd seconds.
             let blinkVisible = !isOverrun || (Int(elapsed) % 2 == 0)
 
-            HStack(spacing: 10) {
+            HStack(spacing: 8) {
                 hudView(
                     elapsed: elapsed,
                     overrun: overrunSeconds,
@@ -42,17 +44,9 @@ struct SyncingActionBar: View {
                     )
                     .labelStyle(.titleAndIcon)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.bordered)
                 .controlSize(.small)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
-            .overlay(
-                RoundedRectangle(cornerRadius: 10)
-                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-            )
-            .shadow(color: .black.opacity(0.15), radius: 6, x: 0, y: 2)
         }
         .sheet(isPresented: $isSchedulingSheetPresented) {
             // Pre-fill the next Sync's duration with the current session's
