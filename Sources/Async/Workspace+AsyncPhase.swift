@@ -55,6 +55,7 @@ extension Workspace {
             nextSyncAt = nil
             syncStartedAt = nil
             plannedDuration = nil
+            nextSyncPlannedDuration = nil
             // lastSyncEndedAt is preserved as a historical record.
             discardCalendarEvent()
 
@@ -93,6 +94,7 @@ extension Workspace {
             nextSyncAt = nil
             syncStartedAt = nil
             plannedDuration = nil
+            nextSyncPlannedDuration = nil
             lastSyncEndedAt = at
             discardCalendarEvent()
 
@@ -185,6 +187,7 @@ extension Workspace {
     @MainActor
     private func syncCalendarEvent(scheduledAt: Date) {
         let title = calendarEventTitle()
+        let duration = nextSyncPlannedDuration ?? 30 * 60
         // Fire the TCC prompt on first use. Fire-and-forget: if the user
         // is granting now, they can reschedule after and we'll succeed.
         // If they deny, we stay in "no calendar" mode silently.
@@ -198,7 +201,8 @@ extension Workspace {
                id: existingId,
                for: id,
                title: title,
-               at: scheduledAt
+               at: scheduledAt,
+               duration: duration
            ) {
             calendarEventId = updatedId
             return
@@ -208,7 +212,8 @@ extension Workspace {
         if let newId = CalendarBridge.shared.createEvent(
             for: id,
             title: title,
-            at: scheduledAt
+            at: scheduledAt,
+            duration: duration
         ) {
             calendarEventId = newId
         } else {

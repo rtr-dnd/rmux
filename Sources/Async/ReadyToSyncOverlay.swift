@@ -7,6 +7,10 @@ struct ReadyToSyncOverlay: View {
     /// Workspace label displayed at the top. Passed in to keep this view
     /// independent of the Workspace model (easier to preview).
     let workspaceTitle: String
+    /// Duration (seconds) chosen at schedule-time for this upcoming Sync.
+    /// When set, the picker pre-selects the nearest option so the user
+    /// doesn't re-pick. `nil` → default 30 min. See spec.md §4.1.
+    let initialPlannedDuration: TimeInterval?
     /// Invoked with the picked duration (seconds) when the user taps Start.
     let onStart: (TimeInterval) -> Void
     /// Invoked when the user taps Cancel.
@@ -16,7 +20,25 @@ struct ReadyToSyncOverlay: View {
     private static let durationMinuteOptions: [Int] = [15, 30, 45, 60, 90, 120, 180, 240]
     private static let defaultDurationMinutes = 30
 
-    @State private var plannedMinutes: Int = ReadyToSyncOverlay.defaultDurationMinutes
+    @State private var plannedMinutes: Int
+
+    init(
+        workspaceTitle: String,
+        initialPlannedDuration: TimeInterval? = nil,
+        onStart: @escaping (TimeInterval) -> Void,
+        onCancel: @escaping () -> Void
+    ) {
+        self.workspaceTitle = workspaceTitle
+        self.initialPlannedDuration = initialPlannedDuration
+        self.onStart = onStart
+        self.onCancel = onCancel
+        let proposed = initialPlannedDuration
+            .map { Int($0 / 60) }
+            .flatMap { value in
+                Self.durationMinuteOptions.min(by: { abs($0 - value) < abs($1 - value) })
+            } ?? Self.defaultDurationMinutes
+        _plannedMinutes = State(initialValue: proposed)
+    }
 
     var body: some View {
         VStack(spacing: 28) {

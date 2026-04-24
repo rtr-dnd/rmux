@@ -2293,11 +2293,41 @@ final class AsyncWorkspacePersistenceTests: XCTestCase {
 
     // MARK: - schema version acceptance
 
-    func testSchemaVersionAcceptanceRangeCoversV1ThroughV3() {
+    func testSchemaVersionAcceptanceRangeCoversV1ThroughV4() {
         XCTAssertTrue(SessionSnapshotSchema.supportedVersions.contains(1))
         XCTAssertTrue(SessionSnapshotSchema.supportedVersions.contains(2))
         XCTAssertTrue(SessionSnapshotSchema.supportedVersions.contains(3))
-        XCTAssertEqual(SessionSnapshotSchema.currentVersion, 3)
+        XCTAssertTrue(SessionSnapshotSchema.supportedVersions.contains(4))
+        XCTAssertEqual(SessionSnapshotSchema.currentVersion, 4)
+    }
+
+    // MARK: - schema v4 nextSyncPlannedDuration round-trip
+
+    func testNextSyncPlannedDurationRoundTripsThroughSnapshot() throws {
+        let w = Workspace()
+        try w.transition(.convertToAsync(
+            initialPhase: .selfRunning,
+            nextSyncAt: Date(timeIntervalSinceNow: 3600)
+        ))
+        w.nextSyncPlannedDuration = 45 * 60
+
+        let snapshot = w.sessionSnapshot(includeScrollback: false)
+        XCTAssertEqual(snapshot.nextSyncPlannedDuration, 45 * 60)
+
+        let restored = Workspace()
+        restored.restoreSessionSnapshot(snapshot)
+        XCTAssertEqual(restored.nextSyncPlannedDuration, 45 * 60)
+    }
+
+    func testNextSyncPlannedDurationClearedOnRevertToNormal() throws {
+        let w = Workspace()
+        try w.transition(.convertToAsync(
+            initialPhase: .selfRunning,
+            nextSyncAt: Date(timeIntervalSinceNow: 3600)
+        ))
+        w.nextSyncPlannedDuration = 60 * 60
+        try w.transition(.revertToNormal)
+        XCTAssertNil(w.nextSyncPlannedDuration)
     }
 
     // MARK: - schema v3 calendarEventId round-trip

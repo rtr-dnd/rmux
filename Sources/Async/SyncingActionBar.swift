@@ -62,8 +62,12 @@ struct SyncingActionBar: View {
             .shadow(color: .black.opacity(0.15), radius: 6, x: 0, y: 2)
         }
         .sheet(isPresented: $isSchedulingSheetPresented) {
+            // Pre-fill the next Sync's duration with the current session's
+            // planned duration — users who picked 45m for this Sync often
+            // want 45m for the next one too.
             ScheduleNextSyncSheet(
                 initialDate: nil,
+                initialPlannedDuration: plannedDuration,
                 onConfirm: { scheduled in
                     isSchedulingSheetPresented = false
                     onEndSync(scheduled)

@@ -7,77 +7,92 @@ struct ScheduledSync: Equatable {
     /// Absolute time the next Sync session is due. Always in the future
     /// (enforced by the picker UI).
     let at: Date
+    /// Planned Sync duration (seconds) chosen at schedule-time. Used both
+    /// for the calendar event's endDate and to pre-fill the Ready-to-sync
+    /// overlay's duration picker. Defaults to 30 min.
+    let plannedDuration: TimeInterval
     /// Google Calendar event identifier, set in Phase 2 when the integration
     /// is active. Always `nil` in Phase 1.
     let calendarEventId: String?
 
-    init(at: Date, calendarEventId: String? = nil) {
+    init(
+        at: Date,
+        plannedDuration: TimeInterval = 30 * 60,
+        calendarEventId: String? = nil
+    ) {
         self.at = at
+        self.plannedDuration = plannedDuration
         self.calendarEventId = calendarEventId
     }
 }
 
-/// Modal for picking the next Sync session time. Shown from
-/// `SelfRunningOverlay` ("スケジュール変更") and `OverdueOverlay` ("リスケ")
-/// — see plan.md §6.7. Copy is not localised yet (Phase 1 Step 14).
+/// Modal for picking the next Sync session's time and duration.
 ///
-/// Behaviour:
-/// - Shows quick-pick presets (1h / 3h / 6h from now, and round "tidy"
-///   times within the next ~7 days).
-/// - Shows a manual `DatePicker` with minutes snapped to 30-min intervals.
-/// - Times in the past are filtered out from both sources.
-/// - Collision checking across multiple Async workspaces is intentionally
-///   out of scope for Phase 1 (Phase 5, §11).
+/// Layout (Phase 2):
+///   - Duration picker (segmented): 15 / 30 / 45 / 1h / 1.5h / 2h / 3h
+///   - Graphical `DatePicker` on the left (select the day)
+///   - Vertical scroll of 30-min time slots on the right for the selected
+///     day, showing busy blocks from `CalendarBridge` as disabled rows
+///   - Summary line + Confirm / Cancel
+///
+/// Busy information is pulled from `CalendarBridge.busyIntervals(...)` —
+/// all calendars merged. When Calendar access is denied the sheet still
+/// works; all slots just show as free.
 struct ScheduleNextSyncSheet: View {
     let initialDate: Date?
+    let initialPlannedDuration: TimeInterval?
     let onConfirm: (ScheduledSync) -> Void
     let onCancel: () -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @State private var selectedDate: Date
-    @State private var selectedQuickPick: Date?
+    @State private var selectedDay: Date
+    @State private var selectedSlot: Date?
+    @State private var durationMinutes: Int
+
+    /// Slot grid spans 07:00 through 23:00 in 30-min increments.
+    private static let slotHourStart = 7
+    private static let slotHourEnd = 23
+    private static let slotStepMinutes = 30
+
+    /// Duration options (minutes).
+    static let durationOptions: [Int] = [15, 30, 45, 60, 90, 120, 180]
+    private static let defaultDurationMinutes = 30
 
     init(
         initialDate: Date? = nil,
+        initialPlannedDuration: TimeInterval? = nil,
         onConfirm: @escaping (ScheduledSync) -> Void,
         onCancel: @escaping () -> Void
     ) {
         self.initialDate = initialDate
+        self.initialPlannedDuration = initialPlannedDuration
         self.onConfirm = onConfirm
         self.onCancel = onCancel
-        let fallback = Self.roundUpTo30Minutes(Date()).addingTimeInterval(3600)
-        let candidate = initialDate ?? fallback
-        _selectedDate = State(initialValue: max(candidate, fallback))
+        let defaultSlot = Self.roundUpTo30Minutes(Date()).addingTimeInterval(3600)
+        let candidate = initialDate.map { max($0, defaultSlot) } ?? defaultSlot
+        _selectedDay = State(initialValue: Calendar(identifier: .gregorian).startOfDay(for: candidate))
+        _selectedSlot = State(initialValue: candidate)
+        let minutes = initialPlannedDuration
+            .map { Int($0 / 60) }
+            .flatMap { proposed in
+                Self.durationOptions.min(by: { abs($0 - proposed) < abs($1 - proposed) })
+            } ?? Self.defaultDurationMinutes
+        _durationMinutes = State(initialValue: minutes)
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 24) {
+        VStack(alignment: .leading, spacing: 16) {
             Text(String(localized: "async.schedule.sheet.title", defaultValue: "Next Sync time"))
                 .font(.title2.weight(.semibold))
 
-            quickPickSection
+            durationPicker
 
-            Divider()
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text(String(localized: "async.schedule.sheet.manualSection", defaultValue: "Manual"))
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                DatePicker(
-                    "",
-                    selection: Binding(
-                        get: { selectedDate },
-                        set: { newValue in
-                            selectedDate = Self.roundUpTo30Minutes(newValue)
-                            selectedQuickPick = nil
-                        }
-                    ),
-                    in: Self.earliestAllowed()...,
-                    displayedComponents: [.date, .hourAndMinute]
-                )
-                .labelsHidden()
-                .datePickerStyle(.compact)
+            HStack(alignment: .top, spacing: 20) {
+                calendarColumn
+                slotColumn
             }
+
+            summaryLine
 
             HStack {
                 Spacer()
@@ -87,75 +102,186 @@ struct ScheduleNextSyncSheet: View {
                 }
                 .keyboardShortcut(.cancelAction)
                 Button(String(localized: "async.schedule.sheet.confirm", defaultValue: "Confirm")) {
-                    onConfirm(ScheduledSync(at: selectedDate))
+                    guard let slot = selectedSlot else { return }
+                    let scheduled = ScheduledSync(
+                        at: slot,
+                        plannedDuration: TimeInterval(durationMinutes * 60)
+                    )
+                    onConfirm(scheduled)
                     dismiss()
                 }
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(.borderedProminent)
-                .disabled(selectedDate <= Date())
+                .disabled(selectedSlot.map { $0 <= Date() } ?? true)
             }
         }
         .padding(24)
-        .frame(minWidth: 420)
+        .frame(minWidth: 640, minHeight: 520)
     }
 
-    // MARK: - Quick picks
+    // MARK: - Duration
 
     @ViewBuilder
-    private var quickPickSection: some View {
-        let now = Date()
-        let presets = Self.quickPickPresets(from: now)
-        // Pull busy intervals for the 7-day window we show quick picks for.
-        // EventKit access is opportunistic — if denied, this returns [] and
-        // all presets stay enabled (calendar-agnostic fallback).
-        let busy = CalendarBridge.shared.busyIntervals(
-            from: now,
-            to: now.addingTimeInterval(8 * 24 * 3600)
-        )
-        if !presets.isEmpty {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(String(localized: "async.schedule.sheet.quickPickSection", defaultValue: "Quick picks"))
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                let columns = [GridItem(.adaptive(minimum: 150), spacing: 8)]
-                LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
-                    ForEach(presets, id: \.date) { preset in
-                        let isBusy = Self.intersectsBusy(preset.date, busy: busy)
-                        Button {
-                            selectedDate = preset.date
-                            selectedQuickPick = preset.date
-                        } label: {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(preset.label)
-                                    .font(.body)
-                                HStack(spacing: 4) {
-                                    Text(Self.formatAbsolute(preset.date))
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                    if isBusy {
-                                        Text(String(localized: "async.schedule.preset.busyBadge",
-                                                    defaultValue: "Busy"))
-                                            .font(.caption2)
-                                            .foregroundStyle(.orange)
-                                    }
-                                }
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.vertical, 6)
-                            .padding(.horizontal, 10)
-                        }
-                        .buttonStyle(.bordered)
-                        .tint(selectedQuickPick == preset.date ? .accentColor : .primary)
-                        .disabled(isBusy)
-                    }
+    private var durationPicker: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(String(localized: "async.schedule.sheet.duration",
+                        defaultValue: "Meeting duration"))
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            Picker("", selection: $durationMinutes) {
+                ForEach(Self.durationOptions, id: \.self) { minutes in
+                    Text(Self.formatDuration(minutes: minutes)).tag(minutes)
                 }
             }
+            .pickerStyle(.segmented)
+            .labelsHidden()
         }
     }
 
-    /// A 30-minute window starting at `candidate` is considered busy if it
-    /// overlaps **any** merged busy interval. Candidates right at the
-    /// boundary of a meeting (end == candidate) are allowed.
+    // MARK: - Calendar column
+
+    @ViewBuilder
+    private var calendarColumn: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(String(localized: "async.schedule.sheet.dateColumn",
+                        defaultValue: "Date"))
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            DatePicker(
+                "",
+                selection: Binding(
+                    get: { selectedDay },
+                    set: { newValue in
+                        let day = Calendar(identifier: .gregorian).startOfDay(for: newValue)
+                        if day != selectedDay {
+                            selectedDay = day
+                            // Carry the chosen hour into the new day so the
+                            // slot highlight stays on the same offset when
+                            // possible.
+                            if let slot = selectedSlot {
+                                selectedSlot = Self.carryTimeOfDay(from: slot, to: day)
+                            }
+                        }
+                    }
+                ),
+                in: Calendar(identifier: .gregorian).startOfDay(for: Date())...,
+                displayedComponents: .date
+            )
+            .labelsHidden()
+            .datePickerStyle(.graphical)
+            .frame(width: 260)
+        }
+    }
+
+    // MARK: - Slot column
+
+    @ViewBuilder
+    private var slotColumn: some View {
+        let busy = CalendarBridge.shared.busyIntervals(
+            from: selectedDay,
+            to: Calendar(identifier: .gregorian).date(
+                byAdding: .day,
+                value: 1,
+                to: selectedDay
+            ) ?? selectedDay.addingTimeInterval(24 * 3600)
+        )
+        let slots = Self.slots(for: selectedDay)
+        let duration = TimeInterval(durationMinutes * 60)
+        let now = Date()
+
+        VStack(alignment: .leading, spacing: 6) {
+            Text(String(localized: "async.schedule.sheet.slotColumn",
+                        defaultValue: "Time"))
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            ScrollView {
+                LazyVStack(spacing: 4) {
+                    ForEach(slots, id: \.self) { slot in
+                        let isBusy = Self.intersectsBusy(
+                            slot,
+                            durationSeconds: duration,
+                            busy: busy
+                        )
+                        let isPast = slot <= now
+                        let disabled = isBusy || isPast
+                        SlotRow(
+                            slot: slot,
+                            isSelected: selectedSlot == slot,
+                            isBusy: isBusy,
+                            isDisabled: disabled
+                        ) {
+                            selectedSlot = slot
+                        }
+                    }
+                }
+                .padding(.trailing, 4)
+            }
+            .frame(maxHeight: 360)
+        }
+        .frame(minWidth: 240)
+    }
+
+    // MARK: - Summary line
+
+    @ViewBuilder
+    private var summaryLine: some View {
+        if let slot = selectedSlot {
+            Text(Self.formatSummary(
+                at: slot,
+                durationMinutes: durationMinutes
+            ))
+            .font(.callout)
+            .foregroundStyle(.secondary)
+        } else {
+            Text(String(localized: "async.schedule.sheet.pickSlotHint",
+                        defaultValue: "Pick an open time slot."))
+                .font(.callout)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    // MARK: - Slot helpers
+
+    /// All 30-min slot start times for the given day, from 07:00 to 23:00.
+    static func slots(for day: Date) -> [Date] {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone.current
+        let dayStart = calendar.startOfDay(for: day)
+        var results: [Date] = []
+        var hour = slotHourStart
+        var minute = 0
+        while hour <= slotHourEnd {
+            if let slot = calendar.date(
+                bySettingHour: hour, minute: minute, second: 0, of: dayStart
+            ) {
+                results.append(slot)
+            }
+            minute += slotStepMinutes
+            if minute >= 60 {
+                minute = 0
+                hour += 1
+            }
+        }
+        return results
+    }
+
+    /// Shift a reference date's time-of-day onto a new day.
+    static func carryTimeOfDay(from source: Date, to day: Date) -> Date {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone.current
+        let hour = calendar.component(.hour, from: source)
+        let minute = calendar.component(.minute, from: source)
+        return calendar.date(
+            bySettingHour: hour, minute: minute, second: 0,
+            of: calendar.startOfDay(for: day)
+        ) ?? day
+    }
+
+    // MARK: - Busy overlap
+
+    /// A window starting at `candidate` for `durationSeconds` is considered
+    /// busy when it overlaps any busy interval. Boundary touches (candidate
+    /// end == busy start, or busy end == candidate start) are allowed.
     static func intersectsBusy(
         _ candidate: Date,
         durationSeconds: TimeInterval = 30 * 60,
@@ -167,52 +293,28 @@ struct ScheduleNextSyncSheet: View {
         }
     }
 
-    // MARK: - Preset generation
+    // MARK: - Formatting
 
-    struct QuickPickPreset: Hashable {
-        let label: String
-        let date: Date
+    static func formatSummary(at slot: Date, durationMinutes: Int) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale.current
+        formatter.dateFormat = "M/d (EEE) HH:mm"
+        let timeStr = formatter.string(from: slot)
+        let durationStr = formatDuration(minutes: durationMinutes)
+        return String(
+            localized: "async.schedule.sheet.summary",
+            defaultValue: "Sync on \(timeStr), \(durationStr)"
+        )
     }
 
-    static func quickPickPresets(from reference: Date) -> [QuickPickPreset] {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.locale = Locale(identifier: "ja_JP")
-        let now = reference
-        let earliest = earliestAllowed(reference: reference)
-
-        var presets: [QuickPickPreset] = []
-        let relativeOffsets: [(String, TimeInterval)] = [
-            (String(localized: "async.schedule.preset.inHours1", defaultValue: "In 1 hour"), 3600),
-            (String(localized: "async.schedule.preset.inHours3", defaultValue: "In 3 hours"), 3 * 3600),
-            (String(localized: "async.schedule.preset.inHours6", defaultValue: "In 6 hours"), 6 * 3600),
-        ]
-        for (label, offset) in relativeOffsets {
-            let candidate = roundUpTo30Minutes(now.addingTimeInterval(offset))
-            if candidate >= earliest {
-                presets.append(QuickPickPreset(label: label, date: candidate))
-            }
-        }
-
-        // Tidy day-of-week slots within the next 7 days.
-        for dayOffset in 1...7 {
-            guard let dayStart = calendar.date(
-                byAdding: .day, value: dayOffset,
-                to: calendar.startOfDay(for: now)
-            ) else { continue }
-            for hour in [9, 18] {
-                guard let slot = calendar.date(
-                    bySettingHour: hour, minute: 0, second: 0, of: dayStart
-                ) else { continue }
-                guard slot > now, slot >= earliest else { continue }
-                let label = formatDayOfWeek(slot, calendar: calendar) + " " + String(format: "%02d:00", hour)
-                presets.append(QuickPickPreset(label: label, date: slot))
-            }
-        }
-
-        // Dedup & cap.
-        var seen: Set<Date> = []
-        return presets.filter { seen.insert($0.date).inserted }.prefix(12).map { $0 }
+    static func formatDuration(minutes: Int) -> String {
+        if minutes < 60 { return "\(minutes)m" }
+        if minutes % 60 == 0 { return "\(minutes / 60)h" }
+        let hours = Double(minutes) / 60.0
+        return String(format: "%.1fh", hours)
     }
+
+    // MARK: - Math
 
     /// Round a date forward to the next 30-minute boundary. Matches the
     /// candidate granularity specified in plan.md §6.7.
@@ -228,26 +330,52 @@ struct ScheduleNextSyncSheet: View {
         }
         return result
     }
+}
 
-    /// Earliest time a Sync may be scheduled. Keeps the picker from offering
-    /// "now" as a quick pick.
-    static func earliestAllowed(reference: Date = Date()) -> Date {
-        // At least 5 minutes in the future, rounded up to the next 30-minute
-        // boundary — gives the user a visible margin to confirm.
-        roundUpTo30Minutes(reference.addingTimeInterval(5 * 60))
-    }
+/// Row shown for each 30-min slot in the time column.
+private struct SlotRow: View {
+    let slot: Date
+    let isSelected: Bool
+    let isBusy: Bool
+    let isDisabled: Bool
+    let onSelect: () -> Void
 
-    private static func formatAbsolute(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "ja_JP")
-        formatter.dateFormat = "M/d (EEE) HH:mm"
-        return formatter.string(from: date)
-    }
+    private static let formatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm"
+        return f
+    }()
 
-    private static func formatDayOfWeek(_ date: Date, calendar: Calendar) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = calendar.locale
-        formatter.dateFormat = "M/d (EEE)"
-        return formatter.string(from: date)
+    var body: some View {
+        Button(action: onSelect) {
+            HStack(spacing: 8) {
+                Text(Self.formatter.string(from: slot))
+                    .font(.body.monospacedDigit())
+                    .foregroundStyle(isDisabled ? .secondary : .primary)
+                Spacer()
+                if isBusy {
+                    Text(String(localized: "async.schedule.preset.busyBadge",
+                                defaultValue: "Busy"))
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(isSelected ? Color.accentColor.opacity(0.18) : Color.clear)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(
+                        isSelected ? Color.accentColor : Color.primary.opacity(0.08),
+                        lineWidth: isSelected ? 1.5 : 1
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(isDisabled)
     }
 }

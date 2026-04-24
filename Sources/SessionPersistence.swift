@@ -7,7 +7,7 @@ enum SessionSnapshotSchema {
     /// fields appear. Older versions are still accepted on load as long as their
     /// number is in `supportedVersions` — all new fields are optional so Swift's
     /// default `Codable` fills them with `nil` when missing.
-    static let currentVersion = 3
+    static let currentVersion = 4
     /// Versions the loader will accept. Keep the range narrow; drop entries only
     /// after a grace period for existing users.
     ///
@@ -15,7 +15,9 @@ enum SessionSnapshotSchema {
     /// - v2: rmux Async fields (`mode`, `asyncPhase`, `nextSyncAt`,
     ///   `syncStartedAt`, `plannedDuration`, `lastSyncEndedAt`)
     /// - v3: rmux Async `calendarEventId` (Phase 2 — EventKit bridge)
-    static let supportedVersions: ClosedRange<Int> = 1...3
+    /// - v4: rmux Async `nextSyncPlannedDuration` — duration chosen at
+    ///   schedule-time so Ready-to-sync pre-fills with that value
+    static let supportedVersions: ClosedRange<Int> = 1...4
 }
 
 enum SessionPersistencePolicy {
@@ -375,6 +377,14 @@ struct SessionWorkspaceSnapshot: Codable, Sendable {
     // Calendar access, we're between Sync sessions pre-Phase-2 data, or
     // we just haven't written one yet. See docs-rmux/spec.md §9.
     var calendarEventId: String?
+
+    // MARK: rmux Async workspace state (schema v4+)
+    //
+    // Duration (seconds) the user chose for the upcoming Sync at
+    // schedule-time. Pre-fills the Ready-to-sync overlay so the user
+    // doesn't re-pick at `preparing` phase. `nil` means "use the overlay's
+    // default (30 min)". See docs-rmux/spec.md §9.2 and §4.1.
+    var nextSyncPlannedDuration: TimeInterval?
 }
 
 struct SessionTabManagerSnapshot: Codable, Sendable {

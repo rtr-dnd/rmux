@@ -5,6 +5,9 @@ import SwiftUI
 struct OverdueOverlay: View {
     let workspaceTitle: String
     let scheduledAt: Date
+    /// Duration (seconds) last chosen for this workspace, pre-fills the
+    /// reschedule sheet. `nil` → sheet default (30 min).
+    let initialPlannedDuration: TimeInterval?
     let onStartNow: () -> Void
     /// Invoked with the user's picked future time when "リスケ" is confirmed.
     let onReschedule: (ScheduledSync) -> Void
@@ -53,6 +56,7 @@ struct OverdueOverlay: View {
         .sheet(isPresented: $isSchedulingSheetPresented) {
             ScheduleNextSyncSheet(
                 initialDate: nil,  // overdue → don't pre-fill the past date
+                initialPlannedDuration: initialPlannedDuration,
                 onConfirm: { scheduled in
                     isSchedulingSheetPresented = false
                     onReschedule(scheduled)

@@ -5,6 +5,10 @@ import SwiftUI
 struct SelfRunningOverlay: View {
     let workspaceTitle: String
     let nextSyncAt: Date
+    /// Duration (seconds) last chosen for this workspace's upcoming Sync,
+    /// so the reschedule sheet pre-selects the same value. `nil` → sheet
+    /// default (30 min).
+    let initialPlannedDuration: TimeInterval?
     /// Invoked with the user's picked time when "スケジュール変更" is confirmed.
     let onReschedule: (ScheduledSync) -> Void
     /// Invoked when the user taps "今すぐ Sync".
@@ -55,6 +59,7 @@ struct SelfRunningOverlay: View {
         .sheet(isPresented: $isSchedulingSheetPresented) {
             ScheduleNextSyncSheet(
                 initialDate: nextSyncAt,
+                initialPlannedDuration: initialPlannedDuration,
                 onConfirm: { scheduled in
                     isSchedulingSheetPresented = false
                     onReschedule(scheduled)

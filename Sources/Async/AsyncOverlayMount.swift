@@ -300,6 +300,7 @@ struct AsyncPhaseOverlayRoot: View {
         case .preparing:
             ReadyToSyncOverlay(
                 workspaceTitle: workspace.title,
+                initialPlannedDuration: workspace.nextSyncPlannedDuration,
                 onStart: { duration in
                     try? workspace.transition(.enterSyncing(plannedDuration: duration, at: Date()))
                 },
@@ -312,7 +313,9 @@ struct AsyncPhaseOverlayRoot: View {
                 SelfRunningOverlay(
                     workspaceTitle: workspace.title,
                     nextSyncAt: nextSyncAt,
+                    initialPlannedDuration: workspace.nextSyncPlannedDuration,
                     onReschedule: { scheduled in
+                        workspace.nextSyncPlannedDuration = scheduled.plannedDuration
                         try? workspace.transition(.reschedule(nextSyncAt: scheduled.at))
                     },
                     onSyncNow: {
@@ -325,10 +328,12 @@ struct AsyncPhaseOverlayRoot: View {
                 OverdueOverlay(
                     workspaceTitle: workspace.title,
                     scheduledAt: scheduledAt,
+                    initialPlannedDuration: workspace.nextSyncPlannedDuration,
                     onStartNow: {
                         try? workspace.transition(.startOverdueSession)
                     },
                     onReschedule: { scheduled in
+                        workspace.nextSyncPlannedDuration = scheduled.plannedDuration
                         try? workspace.transition(.reschedule(nextSyncAt: scheduled.at))
                     }
                 )
@@ -340,6 +345,7 @@ struct AsyncPhaseOverlayRoot: View {
                     syncStartedAt: startedAt,
                     plannedDuration: planned,
                     onEndSync: { scheduled in
+                        workspace.nextSyncPlannedDuration = scheduled.plannedDuration
                         try? workspace.transition(.endSyncing(nextSyncAt: scheduled.at, at: Date()))
                     },
                     onEndSyncAndRevert: {

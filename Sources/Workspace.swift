@@ -339,7 +339,8 @@ extension Workspace {
             syncStartedAt: syncStartedAt,
             plannedDuration: plannedDuration,
             lastSyncEndedAt: lastSyncEndedAt,
-            calendarEventId: calendarEventId
+            calendarEventId: calendarEventId,
+            nextSyncPlannedDuration: nextSyncPlannedDuration
         )
     }
 
@@ -365,6 +366,7 @@ extension Workspace {
         plannedDuration = snapshot.plannedDuration
         lastSyncEndedAt = snapshot.lastSyncEndedAt
         calendarEventId = snapshot.calendarEventId
+        nextSyncPlannedDuration = snapshot.nextSyncPlannedDuration
 
         let panelSnapshotsById = Dictionary(uniqueKeysWithValues: snapshot.panels.map { ($0.id, $0) })
         let leafEntries = restoreSessionLayout(snapshot.layout)
@@ -6697,6 +6699,15 @@ final class Workspace: Identifiable, ObservableObject {
     /// Sync, or when a previous attempt to create the event failed.
     /// All writes go through `Workspace.transition(_:reason:)`.
     @Published var calendarEventId: String? = nil
+
+    /// Duration (seconds) the user chose for the upcoming Sync at
+    /// schedule-time. Carried from `ScheduleNextSyncSheet` through
+    /// `.endSyncing` / `.reschedule` / `.convertToAsync(.selfRunning)` so
+    /// the Ready-to-sync overlay can pre-select it at `preparing` phase.
+    /// Written by the overlay owner before calling `transition`; cleared
+    /// on `revertToNormal` / workspace close. `nil` falls back to the
+    /// overlay default (30 min). See docs-rmux/spec.md §4.1.
+    @Published var nextSyncPlannedDuration: TimeInterval? = nil
 
     /// One-shot subscription that retries the cwd-bound parts of
     /// AgentStateEmitter (CLAUDE.async.md template + .claude/settings.json

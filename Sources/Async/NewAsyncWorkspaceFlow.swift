@@ -54,6 +54,7 @@ enum NewAsyncWorkspaceFlow {
                     debugSource: debugSource
                 ) else { return }
                 guard let workspace = appDelegate.findWorkspace(id: id) else { return }
+                workspace.nextSyncPlannedDuration = scheduled.plannedDuration
                 do {
                     try workspace.transition(
                         .convertToAsync(initialPhase: .selfRunning, nextSyncAt: scheduled.at),
