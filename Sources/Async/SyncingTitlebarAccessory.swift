@@ -59,11 +59,15 @@ struct SyncingTitlebarContent: View {
     @ObservedObject var tabManager: TabManager
 
     var body: some View {
-        if let workspace = syncingCandidate() {
-            SyncingTitlebarInner(workspace: workspace)
-        } else {
-            AsyncStartMenu()
+        HStack(spacing: 0) {
+            Spacer(minLength: 0)
+            if let workspace = syncingCandidate() {
+                SyncingTitlebarInner(workspace: workspace)
+            } else {
+                AsyncStartMenu()
+            }
         }
+        .frame(maxWidth: .infinity)
     }
 
     @MainActor
@@ -136,12 +140,23 @@ private struct AsyncStartMenu: View {
                             defaultValue: "Sync Later…"))
             }
         } label: {
-            Label(
-                String(localized: "async.titlebar.start.menu",
-                       defaultValue: "Start Async Session"),
-                systemImage: "calendar.badge.plus"
-            )
-            .labelStyle(.titleAndIcon)
+            // Manual primary-blue styling: SwiftUI's Menu doesn't play
+            // nicely with `.buttonStyle(.borderedProminent)` on macOS, so
+            // we paint the label ourselves (accent fill + white text) to
+            // get a visible primary-action button in the titlebar.
+            HStack(spacing: 5) {
+                Image(systemName: "calendar.badge.plus")
+                Text(String(localized: "async.titlebar.start.menu",
+                            defaultValue: "Start Async Session"))
+                Image(systemName: "chevron.down")
+                    .font(.caption2.weight(.bold))
+                    .opacity(0.85)
+            }
+            .font(.callout.weight(.medium))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 6))
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)

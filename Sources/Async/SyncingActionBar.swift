@@ -40,13 +40,19 @@ struct SyncingActionBar: View {
                 } label: {
                     Label(
                         String(localized: "async.syncing.endSyncButton", defaultValue: "End Sync"),
-                        systemImage: "calendar.badge.plus"
+                        systemImage: "calendar.badge.minus"
                     )
                     .labelStyle(.titleAndIcon)
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.borderedProminent)
+                .tint(.red)
                 .controlSize(.small)
             }
+            // Explicit macOS label color — `.primary` sometimes rendered
+            // dark-on-dark inside the titlebar accessory. Using the system
+            // label color adapts to the window's effective appearance so
+            // the HUD stays readable on both light and dark titlebars.
+            .foregroundStyle(Color(nsColor: .labelColor))
         }
         .sheet(isPresented: $isSchedulingSheetPresented) {
             // Pre-fill the next Sync's duration with the current session's
@@ -83,12 +89,12 @@ struct SyncingActionBar: View {
         HStack(spacing: 4) {
             Text(Self.formatHMS(elapsed))
                 .monospacedDigit()
-                .foregroundStyle(isOverrun ? .red : .primary)
+                .foregroundStyle(isOverrun ? Color.red : Color(nsColor: .labelColor))
                 .opacity(blinkVisible ? 1.0 : 0.45)
             let plannedLabel = Self.formatHMS(plannedDuration)
             Text(String(localized: "async.syncing.plannedSuffix",
                         defaultValue: "/ planned \(plannedLabel)"))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color(nsColor: .secondaryLabelColor))
             if isOverrun {
                 Text(" (+\(Self.formatHMS(overrun)))")
                     .foregroundStyle(.red)
@@ -96,7 +102,7 @@ struct SyncingActionBar: View {
                     .opacity(blinkVisible ? 1.0 : 0.45)
             }
         }
-        .font(.body)
+        .font(.callout)
     }
 
     /// Render a non-negative `TimeInterval` as `HH:MM:SS`.

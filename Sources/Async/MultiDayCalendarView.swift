@@ -48,6 +48,13 @@ struct MultiDayCalendarView: View {
     private static let rightTrailingWidth: CGFloat = 36
     /// Height of the day-header row above each column.
     private static let headerHeight: CGFloat = 38
+    /// Breathing room above the 0:00 hour so the label isn't clipped at
+    /// the top of the scroll viewport. Also ensures the day-column
+    /// vertical dividers reach the very top of the scroll content.
+    private static let gridTopInset: CGFloat = 14
+    /// Symmetric breathing room below 23:30 so the last label isn't
+    /// jammed against the scroll edge.
+    private static let gridBottomInset: CGFloat = 12
 
     private var calendar: Calendar {
         var c = Calendar(identifier: .gregorian)
@@ -199,6 +206,9 @@ struct MultiDayCalendarView: View {
 
     private var hourColumn: some View {
         VStack(spacing: 0) {
+            // Top inset mirrors the day columns so the 0:00 label and the
+            // hour-0 row start at the same Y offset.
+            Spacer().frame(height: Self.gridTopInset)
             ForEach(Self.startHour..<Self.endHour, id: \.self) { hour in
                 HStack {
                     Spacer()
@@ -211,8 +221,9 @@ struct MultiDayCalendarView: View {
                 .frame(width: Self.hourColumnWidth, height: 60 * Self.pxPerMinute, alignment: .topTrailing)
                 .id("hour-\(hour)")
             }
+            Spacer().frame(height: Self.gridBottomInset)
         }
-        .frame(width: Self.hourColumnWidth, height: gridHeight, alignment: .top)
+        .frame(width: Self.hourColumnWidth, alignment: .top)
     }
 
     // MARK: - Day column
@@ -222,7 +233,7 @@ struct MultiDayCalendarView: View {
         let busy = busyByDay[dayStart] ?? []
         let now = Date()
 
-        return ZStack(alignment: .topLeading) {
+        let grid = ZStack(alignment: .topLeading) {
             // Background hour grid lines.
             VStack(spacing: 0) {
                 ForEach(Self.startHour..<Self.endHour, id: \.self) { _ in
@@ -287,6 +298,12 @@ struct MultiDayCalendarView: View {
             }
         }
         .frame(height: gridHeight)
+
+        return VStack(spacing: 0) {
+            Spacer().frame(height: Self.gridTopInset)
+            grid
+            Spacer().frame(height: Self.gridBottomInset)
+        }
         .frame(maxWidth: .infinity)
         .overlay(
             Rectangle()
