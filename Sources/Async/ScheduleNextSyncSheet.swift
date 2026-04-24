@@ -1,13 +1,13 @@
 import SwiftUI
 
 /// Result of `ScheduleNextSyncSheet`. Wrapped in a struct (rather than a bare
-/// `Date`) so Phase 3 can extend with `calendarEventId` without breaking call
+/// `Date`) so Phase 2 can extend with `calendarEventId` without breaking call
 /// sites. See docs-rmux/spec.md §9 and plan.md §6.7.
 struct ScheduledSync: Equatable {
     /// Absolute time the next Sync session is due. Always in the future
     /// (enforced by the picker UI).
     let at: Date
-    /// Google Calendar event identifier, set in Phase 3 when the integration
+    /// Google Calendar event identifier, set in Phase 2 when the integration
     /// is active. Always `nil` in Phase 1.
     let calendarEventId: String?
 
@@ -103,7 +103,15 @@ struct ScheduleNextSyncSheet: View {
 
     @ViewBuilder
     private var quickPickSection: some View {
-        let presets = Self.quickPickPresets(from: Date())
+        let now = Date()
+        let presets = Self.quickPickPresets(from: now)
+        // Pull busy intervals for the 7-day window we show quick picks for.
+        // EventKit access is opportunistic — if denied, this returns [] and
+        // all presets stay enabled (calendar-agnostic fallback).
+        let busy = CalendarBridge.shared.busyIntervals(
+            from: now,
+            to: now.addingTimeInterval(8 * 24 * 3600)
+        )
         if !presets.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
                 Text(String(localized: "async.schedule.sheet.quickPickSection", defaultValue: "Quick picks"))
@@ -112,6 +120,7 @@ struct ScheduleNextSyncSheet: View {
                 let columns = [GridItem(.adaptive(minimum: 150), spacing: 8)]
                 LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
                     ForEach(presets, id: \.date) { preset in
+                        let isBusy = Self.intersectsBusy(preset.date, busy: busy)
                         Button {
                             selectedDate = preset.date
                             selectedQuickPick = preset.date
@@ -119,9 +128,17 @@ struct ScheduleNextSyncSheet: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(preset.label)
                                     .font(.body)
-                                Text(Self.formatAbsolute(preset.date))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                HStack(spacing: 4) {
+                                    Text(Self.formatAbsolute(preset.date))
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    if isBusy {
+                                        Text(String(localized: "async.schedule.preset.busyBadge",
+                                                    defaultValue: "Busy"))
+                                            .font(.caption2)
+                                            .foregroundStyle(.orange)
+                                    }
+                                }
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.vertical, 6)
@@ -129,9 +146,24 @@ struct ScheduleNextSyncSheet: View {
                         }
                         .buttonStyle(.bordered)
                         .tint(selectedQuickPick == preset.date ? .accentColor : .primary)
+                        .disabled(isBusy)
                     }
                 }
             }
+        }
+    }
+
+    /// A 30-minute window starting at `candidate` is considered busy if it
+    /// overlaps **any** merged busy interval. Candidates right at the
+    /// boundary of a meeting (end == candidate) are allowed.
+    static func intersectsBusy(
+        _ candidate: Date,
+        durationSeconds: TimeInterval = 30 * 60,
+        busy: [DateInterval]
+    ) -> Bool {
+        let candidateEnd = candidate.addingTimeInterval(durationSeconds)
+        return busy.contains { interval in
+            interval.start < candidateEnd && candidate < interval.end
         }
     }
 

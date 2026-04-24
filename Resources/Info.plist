@@ -49,6 +49,10 @@
 	<string>A program running within cmux would like to use your camera.</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>A program running within cmux would like to use Bluetooth to discover passkeys and security keys.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>rmux (a cmux fork) creates Sync session events in your calendar and reads busy times so Sync sessions don't collide with existing meetings.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>rmux (a cmux fork) creates Sync session events in your calendar and reads busy times so Sync sessions don't collide with existing meetings.</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>

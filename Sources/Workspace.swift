@@ -338,7 +338,8 @@ extension Workspace {
             nextSyncAt: nextSyncAt,
             syncStartedAt: syncStartedAt,
             plannedDuration: plannedDuration,
-            lastSyncEndedAt: lastSyncEndedAt
+            lastSyncEndedAt: lastSyncEndedAt,
+            calendarEventId: calendarEventId
         )
     }
 
@@ -363,6 +364,7 @@ extension Workspace {
         syncStartedAt = snapshot.syncStartedAt
         plannedDuration = snapshot.plannedDuration
         lastSyncEndedAt = snapshot.lastSyncEndedAt
+        calendarEventId = snapshot.calendarEventId
 
         let panelSnapshotsById = Dictionary(uniqueKeysWithValues: snapshot.panels.map { ($0.id, $0) })
         let leafEntries = restoreSessionLayout(snapshot.layout)
@@ -6689,6 +6691,12 @@ final class Workspace: Identifiable, ObservableObject {
     @Published var syncStartedAt: Date? = nil
     @Published var plannedDuration: TimeInterval? = nil
     @Published var lastSyncEndedAt: Date? = nil
+    /// EventKit event identifier for the current / next Sync in the user's
+    /// calendar (Phase 2 — see docs-rmux/spec.md §9). `nil` when the user
+    /// has denied Calendar access, or when the workspace has no scheduled
+    /// Sync, or when a previous attempt to create the event failed.
+    /// All writes go through `Workspace.transition(_:reason:)`.
+    @Published var calendarEventId: String? = nil
 
     /// One-shot subscription that retries the cwd-bound parts of
     /// AgentStateEmitter (CLAUDE.async.md template + .claude/settings.json

@@ -65,7 +65,7 @@ struct SelfRunningOverlay: View {
             )
         }
         // Phase 1 Step 10: minimal confirmation before the self-running
-        // interrupt. The stronger cwd-full-path friction lives in Phase 2
+        // interrupt. The stronger cwd-full-path friction lives in Phase 3
         // (spec.md §6.1.6); this covers the MVP floor.
         .alert(
             String(localized: "async.selfRunning.confirmSyncNow.title", defaultValue: "Start Sync now?"),

@@ -493,37 +493,49 @@ Phase 4 以降は MCP 経由で cmux ← エージェントの経路も開ける
 
 **理想挙動**: Sync session の予定は Google Calendar を「ソース」として扱う。cmux 内のスケジュールは必ず Google Calendar に対応する予定を持つ。
 
+**統合方式**: rmux は Google Calendar API を **直接叩かない**。macOS 標準の Calendar.app に Google アカウントを追加してもらい、rmux は EventKit (`EKEventStore`) 越しに system Calendar を読み書きする。これにより:
+
+- rmux 側は OAuth フローを持たない（TCC の Calendar 許可ダイアログが初回に出るだけ）
+- 同期・リフレッシュ・オフライン動作はすべて macOS に任せる（Google への push も macOS が実施）
+- ユーザは Calendar.app や iCal / iOS / Outlook 等、既に使っているカレンダー UI と同じ方法で編集できる
+- rmux アンインストールでも Google 側データに副作用が残らない
+
+コストとして、macOS ↔ Google 間の同期ラグ（通常数分）は受け入れる。Sync の粒度が 30 分なので実用上問題ない。
+
 ### 9.1 連携のオン・オフ
-- 設定画面で Google アカウントを認証すると連携が有効になる。
-- 連携がオフでも Async workspace は使える（ただしカレンダー衝突チェックは cmux 内の他の Async workspace に限られる）。
+- 初回の event 書き込み時に TCC 許可ダイアログが出る（Info.plist の `NSCalendarsFullAccessUsageDescription` がメッセージ）。
+- 許可しなくても Async workspace は使える — `calendarEventId` が nil のまま動き続ける（カレンダー衝突チェックはスキップ、rmux 内スケジューラは通常通り）。
+- 後から System Settings → Privacy & Security → Calendars で許可状態を変えられる。
 
 ### 9.2 予定の作成・更新・削除
-- `syncing → self-running` の終了モーダルで次回時刻を確定したタイミングで Google Calendar に予定を作成する。
-- Sync session を delete / reschedule したら対応するカレンダー予定も更新する。
-- Async workspace を削除したら将来の予定も削除する。
-- 事前通知（5 分前など）は Google Calendar 側のリマインダーに任せる。cmux は独自に事前通知を出さない。
+- `syncing → self-running` の終了モーダルで次回時刻を確定したタイミングで EventKit に event を作成する（`EKEventStore.save`）。
+- `reschedule` で対応する event を move（`event.startDate` / `endDate` を更新して save）。
+- Async → Normal 変換 / workspace 閉じ / 「Normal に戻す」/「今すぐ Sync」割り込み で `EKEventStore.remove`。
+- Event の title: `rmux Sync: <workspace 名>`。`notes` には `rmux://workspace/<UUID>` マーカーを入れて機械可読にする。
+- 事前通知は Google Calendar 側のリマインダーに任せる。rmux は独自に事前通知を出さない。
 
 ### 9.3 空き時間ベースのスケジューリング
-- 予定ピッカーの候補は Google Calendar 上で **空いている時間帯** からのみ表示する。既に別の予定（会議、他の Sync session、など）が入っている時刻は選択肢に出さない（もしくは disabled）。
-- これにより「別の Sync session と被る」ケースは構造的に発生しない。
+- `ScheduleNextSyncSheet` の quick-pick は EventKit の `events(matching:)` で取得した busy 区間（全カレンダー合算・`availability = busy` のみ・all-day は `busy` 指定のときだけ）と重なる候補を **disable** にして「Busy」バッジを出す。
+- マニュアル `DatePicker` 側は制限しない（ユーザが意図的に busy スロットを選ぶ可能性もあるので）。
 - 候補粒度は **30 分**。
+- これにより「別の Sync session と被る」ケースは構造的に発生しない（別 Async workspace が作った event も busy として見える）。
 
 ### 9.4 使用カレンダーの範囲
-- MVP: プライマリカレンダー 1 つだけを空き判定に使う。
-- 将来: 複数カレンダーを選択可能にする（空き判定対象と書き込み先を個別に指定）。ロードマップ。
+- MVP: event 書き込み先は `EKEventStore.defaultCalendarForNewEvents`（ユーザが Calendar.app 設定で指定している「新規予定のデフォルト」）。
+- 空き判定は **全カレンダー合算**（EventKit の predicate に `calendars: nil`）。プライベート予定 / 会社予定 / 他の Sync session が入っていたら候補から外れる。
+- 将来: 設定画面で書き込み先カレンダーを切り替え可能にする（ロードマップ）。
 
 ### 9.5 外部からのカレンダー変更
-- Google Calendar 側で対応する予定を削除 / 移動されたら、次回アプリ起動時（あるいはバックグラウンド同期時）に検出し:
-  - 削除: cmux 側のスケジュールも破棄し、Workspace は `awaiting-attendance` 相当に寄せる（予定時刻を「直前に削除された時刻」として解釈）。ユーザは「今すぐ開始 / リスケ」で判断。
-  - 移動: cmux 側のスケジュールも同期して更新する（Google Calendar 優先）。
+- Calendar.app / iOS / Google Calendar 側で対応する event を削除された場合: 次回 `updateEvent(id:)` 呼び出しが失敗するので、rmux は `createEvent` にフォールバックして新しい event を作る（ユーザが意図的に削除したかどうかの区別は現状しない）。
+- Event を move（時刻変更）された場合: rmux の `nextSyncAt` はそのまま — **EventKit push 通知を購読しない MVP スコープではカレンダー→rmux 追従は行わない**（Phase 4 以降の MCP / push 対応で検討）。ユーザが手動で rmux 側も動かす必要がある。
 
 ### 9.6 不在 / 休暇との整合
-- Google Calendar に「不在」「OOO」「終日予定」があればその時間帯も空きから除外される（§9.3）。
+- Calendar に「不在」「OOO」「終日予定 (busy)」があればその時間帯も busy として見えるので §9.3 で自動的に候補から外れる。
 - 結果として、夜間・休日を避けた自然なリズムで Sync session が組まれることを期待する。
 
-### 9.7 Google Calendar 連携を有効化しない場合
-- Google Calendar 連携は Phase 3（§10）で実装される機能。Phase 1 では連携オフで動作する。
-- 連携オフのときは「空き時間候補のフィルタ」と「Calendar 側イベントとの同期」が行われない。スケジュール選択は rmux 内のみで完結する（複数 Async workspace 間の衝突チェックも §8.2 の通り Phase 5 まで無い）。
+### 9.7 Calendar 連携を有効化しない場合
+- Phase 1 では EventKit アクセスは未配線（`calendarEventId` フィールドだけ用意）。
+- Phase 2 で有効化後も、TCC 許可を拒否すれば従来通り動作する（busy フィルタなし、event 作成なし）。
 
 ---
 

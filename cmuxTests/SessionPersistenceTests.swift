@@ -2293,10 +2293,37 @@ final class AsyncWorkspacePersistenceTests: XCTestCase {
 
     // MARK: - schema version acceptance
 
-    func testSchemaVersionAcceptanceRangeCoversV1AndV2() {
+    func testSchemaVersionAcceptanceRangeCoversV1ThroughV3() {
         XCTAssertTrue(SessionSnapshotSchema.supportedVersions.contains(1))
         XCTAssertTrue(SessionSnapshotSchema.supportedVersions.contains(2))
-        XCTAssertEqual(SessionSnapshotSchema.currentVersion, 2)
+        XCTAssertTrue(SessionSnapshotSchema.supportedVersions.contains(3))
+        XCTAssertEqual(SessionSnapshotSchema.currentVersion, 3)
+    }
+
+    // MARK: - schema v3 calendarEventId round-trip
+
+    func testCalendarEventIdRoundTripsThroughSnapshot() throws {
+        let w = Workspace()
+        try w.transition(.convertToAsync(
+            initialPhase: .selfRunning,
+            nextSyncAt: Date(timeIntervalSinceNow: 3600)
+        ))
+        // Assign manually since the live CalendarBridge may or may not have
+        // been granted Calendar access in the test environment.
+        w.calendarEventId = "eventIdentifier-123"
+
+        let snapshot = w.sessionSnapshot(includeScrollback: false)
+        XCTAssertEqual(snapshot.calendarEventId, "eventIdentifier-123")
+
+        let restored = Workspace()
+        restored.restoreSessionSnapshot(snapshot)
+        XCTAssertEqual(restored.calendarEventId, "eventIdentifier-123")
+    }
+
+    func testCalendarEventIdIsNilForNormalWorkspace() throws {
+        let w = Workspace()
+        let snapshot = w.sessionSnapshot(includeScrollback: false)
+        XCTAssertNil(snapshot.calendarEventId)
     }
 
     // MARK: helpers

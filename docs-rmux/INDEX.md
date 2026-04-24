@@ -57,8 +57,8 @@ UI ラベルは **英単語 `Sync` / `Async` + 日本語助詞**（`Sync 中`、
 
 ## Phase 2 以降のサマリ
 
-- **Phase 2**: Self-running の信頼性と discipline（caffeinate / liveness 監視 / 自動再起動 / 「今すぐ Sync」フルパス手入力摩擦）
-- **Phase 3**: Google Calendar 連携（Sync 予定を Google Calendar のイベントとして管理、空き時間ベースのスケジューリング）
+- **Phase 2**: Google Calendar 連携（Sync 予定を Google Calendar のイベントとして管理、空き時間ベースのスケジューリング）
+- **Phase 3**: Self-running の信頼性と discipline（caffeinate / liveness 監視 / 自動再起動 / 「今すぐ Sync」フルパス手入力摩擦）
 - **Phase 4**: Sync session の密度強化 + エージェント双方向 MCP（稼働率レビュー / Permission 事前交渉 / 履歴 / 能動 push）
 - **Phase 5**: 複数プロジェクト俯瞰（MenuBarExtra 拡張 / プロジェクト一覧 / カレンダービュー / Sync session 間の衝突チェック）
 

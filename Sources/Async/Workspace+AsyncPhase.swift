@@ -41,6 +41,7 @@ extension Workspace {
                 self.nextSyncAt = nextSyncAt
                 syncStartedAt = nil
                 plannedDuration = nil
+                syncCalendarEvent(scheduledAt: nextSyncAt)
             case .syncing, .awaitingAttendance:
                 throw AsyncPhaseTransitionError.unsupportedInitialPhase(initialPhase)
             }
@@ -55,6 +56,7 @@ extension Workspace {
             syncStartedAt = nil
             plannedDuration = nil
             // lastSyncEndedAt is preserved as a historical record.
+            discardCalendarEvent()
 
         case .enterSyncing(let plannedDuration, let at):
             guard mode == .async, asyncPhase == .preparing else {
@@ -80,6 +82,7 @@ extension Workspace {
             syncStartedAt = nil
             plannedDuration = nil
             lastSyncEndedAt = at
+            syncCalendarEvent(scheduledAt: nextSyncAt)
 
         case .endSyncingAndRevert(let at):
             guard mode == .async, asyncPhase == .syncing else {
@@ -91,6 +94,7 @@ extension Workspace {
             syncStartedAt = nil
             plannedDuration = nil
             lastSyncEndedAt = at
+            discardCalendarEvent()
 
         case .scheduledSyncArrived:
             guard mode == .async, asyncPhase == .selfRunning else {
@@ -113,6 +117,12 @@ extension Workspace {
             }
             asyncPhase = .preparing
             // nextSyncAt is preserved so that cancel can infer the previous phase.
+            // Calendar event is now misaligned (user jumped in before the
+            // scheduled time) — delete so it doesn't linger in the user's
+            // calendar as a stale future item. If the user bails and goes
+            // back to self-running via cancelPreparing, the next endSyncing
+            // will write a fresh one.
+            discardCalendarEvent()
 
         case .startOverdueSession:
             guard mode == .async, asyncPhase == .awaitingAttendance else {
@@ -134,6 +144,7 @@ extension Workspace {
             }
             asyncPhase = .selfRunning
             nextSyncAt = newNextSyncAt
+            syncCalendarEvent(scheduledAt: newNextSyncAt)
 
         case .cancelPreparing:
             guard mode == .async, asyncPhase == .preparing else {
@@ -164,6 +175,68 @@ extension Workspace {
         }
         AgentStateEmitter.writeState(for: self)
         _ = reason  // kept for future telemetry / logging
+    }
+
+    /// Create or move the calendar event mirroring this workspace's next
+    /// Sync. On create success the workspace's `calendarEventId` is updated.
+    /// Silent when Calendar access is denied (returns early, leaves the
+    /// workspace otherwise functional — calendar sync is best-effort).
+    /// See docs-rmux/spec.md §9.
+    @MainActor
+    private func syncCalendarEvent(scheduledAt: Date) {
+        let title = calendarEventTitle()
+        // Fire the TCC prompt on first use. Fire-and-forget: if the user
+        // is granting now, they can reschedule after and we'll succeed.
+        // If they deny, we stay in "no calendar" mode silently.
+        if !CalendarBridge.shared.hasFullAccess {
+            Task { @MainActor in
+                await CalendarBridge.shared.requestAccessIfNeeded()
+            }
+        }
+        if let existingId = calendarEventId,
+           let updatedId = CalendarBridge.shared.updateEvent(
+               id: existingId,
+               for: id,
+               title: title,
+               at: scheduledAt
+           ) {
+            calendarEventId = updatedId
+            return
+        }
+        // Either no existing id, or update failed (event was deleted in
+        // Calendar.app). Create a fresh one.
+        if let newId = CalendarBridge.shared.createEvent(
+            for: id,
+            title: title,
+            at: scheduledAt
+        ) {
+            calendarEventId = newId
+        } else {
+            // Calendar access denied or save failed — leave id nil so we
+            // retry on the next transition. No error surfaced to the user.
+            calendarEventId = nil
+        }
+    }
+
+    /// Delete any existing calendar event and clear `calendarEventId`.
+    /// Called on Async → Normal conversions, "Sync を終える → Normal" path,
+    /// workspace close, and user-initiated interrupt-to-preparing.
+    @MainActor
+    private func discardCalendarEvent() {
+        if let id = calendarEventId {
+            CalendarBridge.shared.deleteEvent(id: id)
+        }
+        calendarEventId = nil
+    }
+
+    /// Title for the calendar event. "rmux Sync: <workspace title>" — the
+    /// "rmux Sync:" prefix lets users identify rmux-managed events at a
+    /// glance in Calendar.app.
+    private func calendarEventTitle() -> String {
+        let fallback = "rmux Sync"
+        let label = customTitle ?? title
+        if label.isEmpty { return fallback }
+        return "\(fallback): \(label)"
     }
 
     /// Install a cwd subscription that re-runs `ensureClaudeCodeHook` +

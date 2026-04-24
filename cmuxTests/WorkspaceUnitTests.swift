@@ -5338,3 +5338,67 @@ final class AgentStateEmitterTests: XCTestCase {
         )
     }
 }
+
+// MARK: - rmux ScheduleNextSyncSheet free/busy intersection
+
+@MainActor
+final class ScheduleNextSyncSheetBusyFilterTests: XCTestCase {
+    // Busy-interval filter logic is pure (static). These tests verify the
+    // 30-min window overlap math independent of EventKit — the calendar
+    // bridge is exercised in the app build, not here.
+
+    func testCandidateInsideBusyIntervalIsFiltered() {
+        let busyStart = Date(timeIntervalSince1970: 3600)
+        let busy = [
+            DateInterval(start: busyStart, end: busyStart.addingTimeInterval(60 * 60))
+        ]
+        // Candidate right in the middle.
+        let candidate = busyStart.addingTimeInterval(15 * 60)
+        XCTAssertTrue(
+            ScheduleNextSyncSheet.intersectsBusy(candidate, busy: busy)
+        )
+    }
+
+    func testCandidateStartingAtBusyEndIsAllowed() {
+        let busyStart = Date(timeIntervalSince1970: 3600)
+        let busy = [
+            DateInterval(start: busyStart, end: busyStart.addingTimeInterval(60 * 60))
+        ]
+        // Candidate starts exactly when the meeting ends.
+        let candidate = busyStart.addingTimeInterval(60 * 60)
+        XCTAssertFalse(
+            ScheduleNextSyncSheet.intersectsBusy(candidate, busy: busy)
+        )
+    }
+
+    func testCandidateWindowTailOverlapsBusyStart() {
+        let busyStart = Date(timeIntervalSince1970: 3600)
+        let busy = [
+            DateInterval(start: busyStart, end: busyStart.addingTimeInterval(60 * 60))
+        ]
+        // Candidate starts 10 min before busy — its 30-min window crosses into busy.
+        let candidate = busyStart.addingTimeInterval(-10 * 60)
+        XCTAssertTrue(
+            ScheduleNextSyncSheet.intersectsBusy(candidate, busy: busy)
+        )
+    }
+
+    func testCandidateEndingAtBusyStartIsAllowed() {
+        let busyStart = Date(timeIntervalSince1970: 3600)
+        let busy = [
+            DateInterval(start: busyStart, end: busyStart.addingTimeInterval(60 * 60))
+        ]
+        // Candidate ends exactly when the meeting starts.
+        let candidate = busyStart.addingTimeInterval(-30 * 60)
+        XCTAssertFalse(
+            ScheduleNextSyncSheet.intersectsBusy(candidate, busy: busy)
+        )
+    }
+
+    func testEmptyBusyListPermitsEverything() {
+        let candidate = Date()
+        XCTAssertFalse(
+            ScheduleNextSyncSheet.intersectsBusy(candidate, busy: [])
+        )
+    }
+}
