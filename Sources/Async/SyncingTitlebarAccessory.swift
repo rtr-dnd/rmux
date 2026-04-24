@@ -54,6 +54,16 @@ final class SyncingTitlebarAccessoryViewController: NSTitlebarAccessoryViewContr
         super.init(nibName: nil, bundle: nil)
         view = makeRootView()
         view.identifier = Self.accessoryIdentifier
+        // Pin this accessory to the dark appearance so NSColor.labelColor
+        // resolves to white against macOS's titlebar vibrancy. The titlebar
+        // visually picks up the dark terminal content below it even in
+        // system light mode, so following window.effectiveAppearance (which
+        // stays `aqua` under light mode + app=system) gives unreadable
+        // black-on-dark text. rmux's intended use is a dark terminal, so
+        // pinning here is a pragmatic match; users who flip to a light
+        // terminal theme will see white text on a light titlebar but that
+        // combination is rare in practice.
+        view.appearance = NSAppearance(named: .darkAqua)
         layoutAttribute = .right
         configureControls()
         subscribeToTabManager()
