@@ -4107,6 +4107,16 @@ class TabManager: ObservableObject {
         clearWorkspacePullRequestTracking(workspaceId: workspace.id)
         sidebarSelectedWorkspaceIds.remove(workspace.id)
 
+        // rmux Async cleanup: closing a workspace without explicitly ending
+        // the Sync is treated as "abandon this Async session". Revert to
+        // Normal so the persisted snapshot doesn't resurrect stale Async
+        // state on next launch, and drop the per-workspace state file.
+        // See docs-rmux/spec.md §4.6.
+        if workspace.mode == .async {
+            try? workspace.transition(.revertToNormal, reason: "workspace.close")
+        }
+        AgentStateEmitter.discardState(forWorkspaceId: workspace.id)
+
         AppDelegate.shared?.notificationStore?.clearNotifications(forTabId: workspace.id)
         workspace.teardownAllPanels()
         workspace.teardownRemoteConnection()

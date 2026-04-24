@@ -13,7 +13,7 @@
 | UI ラベル | `Ready to sync` / `Overdue` | 日本語への無理な直訳 |
 | コード enum case | `preparing` / `syncing` / `selfRunning` / `awaitingAttendance` | 他の綴り |
 
-エージェント向けテキスト（hook 出力、`CLAUDE.async.md` テンプレ）は **英語固定**。ローカライズ対象外。
+エージェント向けテキスト（hook 出力）は **英語固定**。ローカライズ対象外。プロジェクト cwd 配下に agent 向けドキュメントを配布しない方針（`CLAUDE.async.md` は廃止、spec §7.2）。
 
 ---
 
@@ -55,7 +55,7 @@
 - `Sources/SessionPersistence.swift` — schema v1→v2
 - `Sources/TerminalNotificationStore.swift` — 通知抑制ゲート
 - `Resources/Localizable.xcstrings` — `async.*` キー追加
-- `Resources/AgentTemplates/` — 新設、Async workspace 作成時に cwd にコピーするテンプレ（`CLAUDE.async.md`, `prompt-hook.sh`）
+- Hook script (`~/.cmux/prompt-hook.sh`) の内容は `Sources/Async/AgentStateEmitter.swift` 内にインライン定義。`Resources/AgentTemplates/` のようなディレクトリは用意しない（cwd 配布物をゼロにする方針のため）
 
 **それ以外の既存コードには原則触らない**。触る必要が出たら PROGRESS.md の「仕様の未解決 / 揺れ」に記録して議論。
 

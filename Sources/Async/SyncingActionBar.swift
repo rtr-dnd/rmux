@@ -10,8 +10,12 @@ struct SyncingActionBar: View {
     let syncStartedAt: Date
     let plannedDuration: TimeInterval
     let onEndSync: (ScheduledSync) -> Void
+    /// Invoked when the user picks "Normal に戻す" — end the Sync without
+    /// committing to a next session. See docs-rmux/spec.md §4.4.
+    let onEndSyncAndRevert: () -> Void
 
     @State private var isSchedulingSheetPresented = false
+    @State private var isRevertConfirmPresented = false
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1.0)) { context in
@@ -29,10 +33,21 @@ struct SyncingActionBar: View {
                     blinkVisible: blinkVisible
                 )
                 Button {
+                    isRevertConfirmPresented = true
+                } label: {
+                    Text(String(localized: "async.syncing.revertButton",
+                                defaultValue: "Revert to Normal"))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                Button {
                     isSchedulingSheetPresented = true
                 } label: {
-                    Label("Sync を終える", systemImage: "calendar.badge.plus")
-                        .labelStyle(.titleAndIcon)
+                    Label(
+                        String(localized: "async.syncing.endSyncButton", defaultValue: "End Sync"),
+                        systemImage: "calendar.badge.plus"
+                    )
+                    .labelStyle(.titleAndIcon)
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
@@ -58,6 +73,19 @@ struct SyncingActionBar: View {
                 }
             )
         }
+        .alert(
+            String(localized: "async.syncing.confirmRevert.title",
+                   defaultValue: "End Sync and revert to Normal?"),
+            isPresented: $isRevertConfirmPresented
+        ) {
+            Button(String(localized: "async.common.cancel", defaultValue: "Cancel"),
+                   role: .cancel) {}
+            Button(String(localized: "async.syncing.confirmRevert.confirm",
+                          defaultValue: "Revert")) { onEndSyncAndRevert() }
+        } message: {
+            Text(String(localized: "async.syncing.confirmRevert.message",
+                        defaultValue: "No next Sync will be scheduled. You can re-enable Async later from the File menu."))
+        }
     }
 
     @ViewBuilder
@@ -72,7 +100,9 @@ struct SyncingActionBar: View {
                 .monospacedDigit()
                 .foregroundStyle(isOverrun ? .red : .primary)
                 .opacity(blinkVisible ? 1.0 : 0.45)
-            Text("/ 予定 \(Self.formatHMS(plannedDuration))")
+            let plannedLabel = Self.formatHMS(plannedDuration)
+            Text(String(localized: "async.syncing.plannedSuffix",
+                        defaultValue: "/ planned \(plannedLabel)"))
                 .foregroundStyle(.secondary)
             if isOverrun {
                 Text(" (+\(Self.formatHMS(overrun)))")

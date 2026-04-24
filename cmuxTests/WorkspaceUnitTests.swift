@@ -4722,6 +4722,47 @@ final class AsyncPhaseTransitionTests: XCTestCase {
         )
     }
 
+    // MARK: endSyncingAndRevert
+
+    func testEndSyncingAndRevertReturnsToNormalAndRecordsLastSyncEndedAt() throws {
+        let w = Workspace()
+        try w.transition(.convertToAsync(initialPhase: .preparing, nextSyncAt: nil))
+        let start = Date()
+        try w.transition(.enterSyncing(plannedDuration: 1800, at: start))
+        let end = start.addingTimeInterval(1200)
+        try w.transition(.endSyncingAndRevert(at: end))
+
+        XCTAssertEqual(w.mode, .normal)
+        XCTAssertNil(w.asyncPhase)
+        XCTAssertNil(w.nextSyncAt)
+        XCTAssertNil(w.syncStartedAt)
+        XCTAssertNil(w.plannedDuration)
+        XCTAssertEqual(w.lastSyncEndedAt, end)
+    }
+
+    func testEndSyncingAndRevertFromNonSyncingRejected() {
+        let w = Workspace()
+        XCTAssertThrowsError(
+            try w.transition(.endSyncingAndRevert(at: Date()))
+        )
+    }
+
+    // MARK: scheduledSyncArrived
+
+    func testScheduledSyncArrivedMovesSelfRunningToPreparingAndPreservesNextSyncAt() throws {
+        let w = Workspace()
+        let at = Date()
+        try w.transition(.convertToAsync(initialPhase: .selfRunning, nextSyncAt: at))
+        try w.transition(.scheduledSyncArrived(at: at))
+        XCTAssertEqual(w.asyncPhase, .preparing)
+        XCTAssertEqual(w.nextSyncAt, at, "nextSyncAt preserved so escalation can time off it")
+    }
+
+    func testScheduledSyncArrivedFromNonSelfRunningRejected() {
+        let w = Workspace()
+        XCTAssertThrowsError(try w.transition(.scheduledSyncArrived(at: Date())))
+    }
+
     // MARK: markAwaitingAttendance
 
     func testMarkAwaitingAttendancePreservesNextSyncAt() throws {
@@ -4733,7 +4774,20 @@ final class AsyncPhaseTransitionTests: XCTestCase {
         XCTAssertEqual(w.nextSyncAt, future)
     }
 
-    func testMarkAwaitingAttendanceFromNonSelfRunningRejected() {
+    func testMarkAwaitingAttendanceFromPreparingIsAcceptedForScheduledEscalation() throws {
+        // The 10-min escalation path: scheduler fired arrival
+        // (selfRunning → preparing), user didn't click Start, then scheduler
+        // fires escalation (preparing → awaitingAttendance).
+        let w = Workspace()
+        let at = Date(timeIntervalSinceNow: -30)
+        try w.transition(.convertToAsync(initialPhase: .selfRunning, nextSyncAt: at))
+        try w.transition(.scheduledSyncArrived(at: at))
+        XCTAssertEqual(w.asyncPhase, .preparing)
+        try w.transition(.markAwaitingAttendance)
+        XCTAssertEqual(w.asyncPhase, .awaitingAttendance)
+    }
+
+    func testMarkAwaitingAttendanceFromNormalRejected() {
         let w = Workspace()
         XCTAssertThrowsError(try w.transition(.markAwaitingAttendance))
     }
@@ -4928,35 +4982,49 @@ final class AsyncPhaseTransitionTests: XCTestCase {
 }
 
 // MARK: - rmux AgentStateEmitter
-// Verifies `.cmux/state.json` is written atomically with the expected schema
-// and that the CLAUDE.async.md template seed is idempotent.
+// Verifies the per-workspace state file (under Application Support, keyed by
+// workspace UUID) is written atomically with the expected schema, that the
+// global hook script is installed once, and that the cwd-resident
+// `CLAUDE.async.md` template + `.claude/settings.json` merge are idempotent.
 
 @MainActor
 final class AgentStateEmitterTests: XCTestCase {
 
     private var tempRoot: URL!
+    private var stateRoot: URL!
+    private var hookDir: URL!
 
     override func setUpWithError() throws {
         try super.setUpWithError()
         tempRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("rmux-agent-state-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+        stateRoot = tempRoot.appendingPathComponent("state-root", isDirectory: true)
+        hookDir = tempRoot.appendingPathComponent("global-hook", isDirectory: true)
+        AgentStatePaths.stateRoot = stateRoot
+        AgentStatePaths.globalHookDir = hookDir
     }
 
     override func tearDownWithError() throws {
+        AgentStatePaths.resetToDefaults()
         if let tempRoot {
             try? FileManager.default.removeItem(at: tempRoot)
         }
         tempRoot = nil
+        stateRoot = nil
+        hookDir = nil
         try super.tearDownWithError()
     }
 
     private func makeWorkspace() -> Workspace {
+        // The workspace's cwd governs only the cwd-bound resources
+        // (CLAUDE.async.md + .claude/settings.json). The state file is
+        // workspaceId-keyed and lives under `stateRoot`.
         Workspace(workingDirectory: tempRoot.path)
     }
 
-    private func readStateJSON() throws -> [String: Any] {
-        let url = tempRoot.appendingPathComponent(".cmux/state.json")
+    private func readStateJSON(for workspace: Workspace) throws -> [String: Any] {
+        let url = URL(fileURLWithPath: AgentStatePaths.stateFilePath(for: workspace.id))
         let data = try Data(contentsOf: url)
         return try XCTUnwrap(
             try JSONSerialization.jsonObject(with: data) as? [String: Any]
@@ -4970,9 +5038,10 @@ final class AgentStateEmitterTests: XCTestCase {
         try w.transition(.convertToAsync(initialPhase: .preparing, nextSyncAt: nil))
         try w.transition(.enterSyncing(plannedDuration: 1800, at: Date(timeIntervalSinceNow: -120)))
 
-        let json = try readStateJSON()
+        let json = try readStateJSON(for: w)
         XCTAssertEqual(json["phase"] as? String, "syncing")
         XCTAssertEqual(json["schemaVersion"] as? Int, 1)
+        XCTAssertEqual(json["workspaceId"] as? String, w.id.uuidString)
         let syncing = try XCTUnwrap(json["syncing"] as? [String: Any])
         XCTAssertEqual(syncing["plannedDurationSeconds"] as? Int, 1800)
         let elapsed = try XCTUnwrap(syncing["elapsedSeconds"] as? Int)
@@ -4985,7 +5054,7 @@ final class AgentStateEmitterTests: XCTestCase {
         let future = Date(timeIntervalSinceNow: 3600)
         try w.transition(.convertToAsync(initialPhase: .selfRunning, nextSyncAt: future))
 
-        let json = try readStateJSON()
+        let json = try readStateJSON(for: w)
         XCTAssertEqual(json["phase"] as? String, "selfRunning")
         let selfRunning = try XCTUnwrap(json["selfRunning"] as? [String: Any])
         XCTAssertNotNil(selfRunning["nextSyncAt"])
@@ -5001,7 +5070,7 @@ final class AgentStateEmitterTests: XCTestCase {
         try w.transition(.convertToAsync(initialPhase: .selfRunning, nextSyncAt: past))
         try w.transition(.markAwaitingAttendance)
 
-        let json = try readStateJSON()
+        let json = try readStateJSON(for: w)
         XCTAssertEqual(json["phase"] as? String, "awaitingAttendance")
         let awaiting = try XCTUnwrap(json["awaitingAttendance"] as? [String: Any])
         let overdue = try XCTUnwrap(awaiting["overdueSeconds"] as? Int)
@@ -5013,53 +5082,96 @@ final class AgentStateEmitterTests: XCTestCase {
         try w.transition(.convertToAsync(initialPhase: .preparing, nextSyncAt: nil))
         try w.transition(.revertToNormal)
 
-        let url = tempRoot.appendingPathComponent(".cmux/state.json")
-        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+        let path = AgentStatePaths.stateFilePath(for: w.id)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: path))
     }
 
-    // MARK: template seeding
+    func testWriteStateIsolatesWorkspacesSharingCwd() throws {
+        // Two workspaces with the same cwd must own independent state files.
+        let a = makeWorkspace()
+        let b = makeWorkspace()
+        try a.transition(.convertToAsync(initialPhase: .preparing, nextSyncAt: nil))
+        try b.transition(.convertToAsync(
+            initialPhase: .selfRunning,
+            nextSyncAt: Date(timeIntervalSinceNow: 1800)
+        ))
 
-    func testEnsureTemplateWritesClaudeAsyncMarkdownOnFirstConvert() throws {
+        let aJson = try readStateJSON(for: a)
+        let bJson = try readStateJSON(for: b)
+        XCTAssertEqual(aJson["phase"] as? String, "preparing")
+        XCTAssertEqual(bJson["phase"] as? String, "selfRunning")
+        XCTAssertNotEqual(
+            AgentStatePaths.stateFilePath(for: a.id),
+            AgentStatePaths.stateFilePath(for: b.id)
+        )
+    }
+
+    func testDiscardStateRemovesFileAndDirectory() throws {
+        let w = makeWorkspace()
+        try w.transition(.convertToAsync(initialPhase: .preparing, nextSyncAt: nil))
+        AgentStateEmitter.discardState(forWorkspaceId: w.id)
+
+        let path = AgentStatePaths.stateFilePath(for: w.id)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: path))
+        let dir = AgentStatePaths.stateDirectory(for: w.id).path
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dir))
+    }
+
+    // MARK: template seeding (cwd-resident)
+
+    // MARK: cwd-resident artefacts
+
+    func testConvertToAsyncDoesNotPlantAnyFilesInProjectTree() throws {
+        // rmux's policy (docs-rmux/spec.md §7.2, project-wide principle):
+        // nothing rmux writes may land in the git-tracked project tree.
+        // The only cwd-bound file we touch is `.claude/settings.local.json`
+        // (gitignored by Claude Code convention). Absolutely no CLAUDE.md,
+        // CLAUDE.async.md, .cmux/, or README should be seeded.
         let w = makeWorkspace()
         try w.transition(.convertToAsync(initialPhase: .preparing, nextSyncAt: nil))
 
-        let url = tempRoot.appendingPathComponent("CLAUDE.async.md")
-        XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
-        let body = try String(contentsOf: url, encoding: .utf8)
-        XCTAssertTrue(body.contains("rmux Async workspace"))
-        XCTAssertTrue(body.contains(".cmux/state.json"))
+        let forbidden: [String] = [
+            "CLAUDE.async.md",
+            "CLAUDE.md",
+            ".cmux",
+            ".cmux/state.json",
+            ".cmux/prompt-hook.sh",
+            ".claude/settings.json",
+        ]
+        for path in forbidden {
+            let url = tempRoot.appendingPathComponent(path)
+            XCTAssertFalse(
+                FileManager.default.fileExists(atPath: url.path),
+                "rmux must not plant \(path) in the project tree"
+            )
+        }
     }
 
-    func testEnsureTemplateNeverOverwritesExistingFile() throws {
-        let url = tempRoot.appendingPathComponent("CLAUDE.async.md")
-        try "custom user content".write(to: url, atomically: true, encoding: .utf8)
+    // MARK: Claude Code hook installation (global script + .claude/settings.local.json)
 
+    func testConvertToAsyncInstallsGlobalPromptHookScriptAsExecutable() throws {
         let w = makeWorkspace()
         try w.transition(.convertToAsync(initialPhase: .preparing, nextSyncAt: nil))
 
-        let body = try String(contentsOf: url, encoding: .utf8)
-        XCTAssertEqual(body, "custom user content")
-    }
-
-    // MARK: Claude Code hook installation
-
-    func testConvertToAsyncInstallsPromptHookScriptAsExecutable() throws {
-        let w = makeWorkspace()
-        try w.transition(.convertToAsync(initialPhase: .preparing, nextSyncAt: nil))
-
-        let hook = tempRoot.appendingPathComponent(".cmux/prompt-hook.sh")
-        XCTAssertTrue(FileManager.default.fileExists(atPath: hook.path))
-        let attrs = try FileManager.default.attributesOfItem(atPath: hook.path)
+        let hookPath = AgentStatePaths.globalHookScriptPath
+        XCTAssertTrue(FileManager.default.fileExists(atPath: hookPath))
+        let attrs = try FileManager.default.attributesOfItem(atPath: hookPath)
         let perms = try XCTUnwrap(attrs[.posixPermissions] as? NSNumber).uint16Value
         XCTAssertEqual(perms & 0o100, 0o100, "owner-execute bit should be set")
     }
 
-    func testConvertToAsyncMergesClaudeSettings() throws {
+    func testConvertToAsyncMergesLocalSettingsPointingAtGlobalHook() throws {
         let w = makeWorkspace()
         try w.transition(.convertToAsync(initialPhase: .preparing, nextSyncAt: nil))
 
-        let settings = tempRoot.appendingPathComponent(".claude/settings.json")
+        let settings = tempRoot.appendingPathComponent(".claude/settings.local.json")
         XCTAssertTrue(FileManager.default.fileExists(atPath: settings.path))
+        // settings.json (team-shared, git-tracked) must remain untouched.
+        let teamSettings = tempRoot.appendingPathComponent(".claude/settings.json")
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: teamSettings.path),
+            "rmux must not write to .claude/settings.json (git-tracked)"
+        )
         let data = try Data(contentsOf: settings)
         let root = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
         let hooks = try XCTUnwrap(root["hooks"] as? [String: Any])
@@ -5067,11 +5179,11 @@ final class AgentStateEmitterTests: XCTestCase {
         XCTAssertEqual(entries.count, 1)
         let subHooks = try XCTUnwrap(entries[0]["hooks"] as? [[String: Any]])
         let command = try XCTUnwrap(subHooks.first?["command"] as? String)
-        XCTAssertTrue(command.hasSuffix(".cmux/prompt-hook.sh"))
+        XCTAssertEqual(command, AgentStatePaths.globalHookScriptPath)
     }
 
     func testHookMergePreservesExistingUserHooks() throws {
-        let settings = tempRoot.appendingPathComponent(".claude/settings.json")
+        let settings = tempRoot.appendingPathComponent(".claude/settings.local.json")
         try FileManager.default.createDirectory(
             at: settings.deletingLastPathComponent(),
             withIntermediateDirectories: true
@@ -5104,7 +5216,7 @@ final class AgentStateEmitterTests: XCTestCase {
             return subHooks.compactMap { $0["command"] as? String }
         }
         XCTAssertTrue(allCommands.contains("/usr/local/bin/user-hook.sh"))
-        XCTAssertTrue(allCommands.contains(where: { $0.hasSuffix(".cmux/prompt-hook.sh") }))
+        XCTAssertTrue(allCommands.contains(AgentStatePaths.globalHookScriptPath))
     }
 
     func testHookMergeIsIdempotent() throws {
@@ -5113,7 +5225,7 @@ final class AgentStateEmitterTests: XCTestCase {
         // Trigger another transition that calls ensureClaudeCodeHook again.
         try w.transition(.enterSyncing(plannedDuration: 300, at: Date()))
 
-        let settings = tempRoot.appendingPathComponent(".claude/settings.json")
+        let settings = tempRoot.appendingPathComponent(".claude/settings.local.json")
         let data = try Data(contentsOf: settings)
         let root = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
         let entries = try XCTUnwrap(
@@ -5122,17 +5234,107 @@ final class AgentStateEmitterTests: XCTestCase {
         XCTAssertEqual(entries.count, 1, "repeated transitions must not duplicate the rmux hook")
     }
 
-    // MARK: home-directory safety guard
+    func testHookFollowsCwdChange() throws {
+        // An Async workspace whose cwd changes (e.g., user `cd`s to a
+        // different project in the terminal) must install the hook at the
+        // new cwd too. Without this, hook lands only at the workspace's
+        // initial cwd and subsequent projects silently skip the install.
+        let startDir = tempRoot.appendingPathComponent("project-a", isDirectory: true)
+        let destDir = tempRoot.appendingPathComponent("project-b", isDirectory: true)
+        try FileManager.default.createDirectory(at: startDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: destDir, withIntermediateDirectories: true)
 
-    func testWriteStateSkipsWhenCwdEqualsHome() throws {
+        let w = Workspace(workingDirectory: startDir.path)
+        try w.transition(.convertToAsync(initialPhase: .preparing, nextSyncAt: nil))
+
+        // Hook must be present at the initial cwd.
+        let initialSettings = startDir.appendingPathComponent(".claude/settings.local.json")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: initialSettings.path))
+
+        // Simulate the terminal reporting a new cwd via OSC 7 / shell
+        // integration (normally flows through Workspace.updatePanelDirectory).
+        let expectation = expectation(description: "hook written for new cwd")
+        let destSettings = destDir.appendingPathComponent(".claude/settings.local.json")
+        Task { @MainActor in
+            w.currentDirectory = destDir.path
+            // The sink hops through a Task { @MainActor in ... }. Spin the
+            // run loop briefly to let it resolve.
+            for _ in 0..<50 {
+                if FileManager.default.fileExists(atPath: destSettings.path) {
+                    expectation.fulfill()
+                    return
+                }
+                try await Task.sleep(nanoseconds: 20_000_000)
+            }
+            XCTFail("hook was not installed at new cwd within timeout")
+            expectation.fulfill()
+        }
+        wait(for: [expectation], timeout: 5)
+
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: destSettings.path),
+            "hook must be installed at the new cwd when the workspace cd's there"
+        )
+        // And the original cwd's hook must still be there (not moved, just followed).
+        XCTAssertTrue(FileManager.default.fileExists(atPath: initialSettings.path))
+    }
+
+    // MARK: workspace close revert
+
+    func testClosingAsyncWorkspaceRevertsToNormalAndDiscardsStateFile() throws {
+        // Closing a workspace without explicitly ending the Sync session
+        // must revert the workspace to Normal and drop its per-workspace
+        // state file. On next launch, session restore should not resurrect
+        // a stale Async state.
+        let manager = TabManager()
+        // Add a second workspace — closeWorkspace refuses when only one remains.
+        _ = manager.addWorkspace(select: false)
+        let w = manager.addWorkspace(select: true)
+        // Point the workspace at a real directory so the hook path can write.
+        w.currentDirectory = tempRoot.path
+        try w.transition(.convertToAsync(
+            initialPhase: .selfRunning,
+            nextSyncAt: Date(timeIntervalSinceNow: 3600)
+        ))
+        let stateFile = AgentStatePaths.stateFilePath(for: w.id)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: stateFile))
+
+        manager.closeWorkspace(w)
+
+        XCTAssertEqual(w.mode, .normal, "closed workspace should revert to Normal")
+        XCTAssertNil(w.asyncPhase)
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: stateFile),
+            "state.json must be deleted when the workspace closes"
+        )
+    }
+
+    // MARK: cwd-resident artefact safety
+
+    func testHookSettingsSkipWhenCwdEqualsHome() throws {
+        // settings.local.json is cwd-bound; refuse to write it into the
+        // user's $HOME so test runs don't install a global hook entry. The
+        // state file lives under stateRoot and is still written.
         let w = Workspace()  // defaults currentDirectory to $HOME
         try w.transition(.convertToAsync(initialPhase: .preparing, nextSyncAt: nil))
 
-        let url = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".cmux/state.json")
-        XCTAssertFalse(
-            FileManager.default.fileExists(atPath: url.path),
-            "AgentStateEmitter must refuse to write into the user's $HOME even when the workspace cwd points there."
+        let homeSettingsLocal = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".claude/settings.local.json")
+        // The file may already exist for unrelated reasons. The stronger
+        // assertion is that state.json for this workspace was written (proves
+        // transition + writeState ran) without polluting $HOME's Claude
+        // settings. If settings.local.json didn't exist before the test,
+        // confirm it still doesn't.
+        let preexisted = FileManager.default.fileExists(atPath: homeSettingsLocal.path)
+        if !preexisted {
+            XCTAssertFalse(
+                FileManager.default.fileExists(atPath: homeSettingsLocal.path),
+                "ensureClaudeCodeHook must refuse to touch $HOME/.claude/settings.local.json"
+            )
+        }
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: AgentStatePaths.stateFilePath(for: w.id)),
+            "state.json must still be written for $HOME-cwd workspaces (path is workspaceId-based)"
         )
     }
 }

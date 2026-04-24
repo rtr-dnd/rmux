@@ -23,7 +23,9 @@ struct SelfRunningOverlay: View {
 
             TimelineView(.periodic(from: .now, by: 30)) { context in
                 let remaining = nextSyncAt.timeIntervalSince(context.date)
-                Text("次の Sync は \(Self.formatRemaining(remaining)) 後")
+                let remainingLabel = Self.formatRemaining(remaining)
+                Text(String(localized: "async.selfRunning.nextSyncCountdown",
+                            defaultValue: "Next Sync in \(remainingLabel)"))
                     .font(.system(size: 40, weight: .semibold))
                     .monospacedDigit()
             }
@@ -33,10 +35,10 @@ struct SelfRunningOverlay: View {
                 .foregroundStyle(.secondary)
 
             HStack(spacing: 12) {
-                Button("スケジュール変更") {
+                Button(String(localized: "async.selfRunning.rescheduleButton", defaultValue: "Reschedule")) {
                     isSchedulingSheetPresented = true
                 }
-                Button("今すぐ Sync") {
+                Button(String(localized: "async.selfRunning.syncNowButton", defaultValue: "Sync Now")) {
                     isSyncNowConfirmPresented = true
                 }
                 .buttonStyle(.borderedProminent)
@@ -65,15 +67,19 @@ struct SelfRunningOverlay: View {
         // Phase 1 Step 10: minimal confirmation before the self-running
         // interrupt. The stronger cwd-full-path friction lives in Phase 2
         // (spec.md §6.1.6); this covers the MVP floor.
-        .alert("今すぐ Sync しますか？", isPresented: $isSyncNowConfirmPresented) {
-            Button("キャンセル", role: .cancel) {}
-            Button("開始") { onSyncNow() }
+        .alert(
+            String(localized: "async.selfRunning.confirmSyncNow.title", defaultValue: "Start Sync now?"),
+            isPresented: $isSyncNowConfirmPresented
+        ) {
+            Button(String(localized: "async.common.cancel", defaultValue: "Cancel"), role: .cancel) {}
+            Button(String(localized: "async.common.start", defaultValue: "Start")) { onSyncNow() }
         } message: {
-            Text("裏で走っている自走作業が中断されます。")
+            Text(String(localized: "async.selfRunning.confirmSyncNow.message",
+                        defaultValue: "The self-running agent session will be interrupted."))
         }
     }
 
-    /// Formats a future interval as "2h 14m", "18m", or "1分未満" (floor).
+    /// Formats a future interval as "2h 14m", "18m", or "<1m" (floor).
     /// Negative values (past) render as "0m" so the UI never shows negatives.
     static func formatRemaining(_ seconds: TimeInterval) -> String {
         let total = max(0, Int(seconds))
@@ -85,6 +91,6 @@ struct SelfRunningOverlay: View {
         if minutes > 0 {
             return "\(minutes)m"
         }
-        return "1分未満"
+        return String(localized: "async.selfRunning.remainingUnderMinute", defaultValue: "<1m")
     }
 }

@@ -6,7 +6,7 @@
 
 ## 現在の焦点
 
-Phase 1 Step 1–Step 12 完了。残りは Step 13（新規 Async workspace 作成 UI）と Step 14（ローカライズ）のみ。
+**Phase 1 (MVP) + Phase 1.5 (agent state + cwd 配布物の切り詰め) 完了。** rmux が cwd に置くファイルは `.claude/settings.local.json` のみ（gitignored）、それ以外は `$HOME` 配下。プロジェクトツリーに `CLAUDE.async.md` や `.cmux/` は置かない方針を確定。
 
 実装済み（ブランチ `rmux/phase1/data-model`）:
 - **データモデル** — `WorkspaceMode` / `AsyncPhase` / `AsyncPhaseTransition` / `AsyncPhaseTransitionError` + `Workspace.transition(_:reason:)` + 派生ヘルパー 4 本。
@@ -17,21 +17,24 @@ Phase 1 Step 1–Step 12 完了。残りは Step 13（新規 Async workspace 作
 - **AgentStateEmitter** — `.cmux/state.json` 自動書き込み（schemaVersion 1、atomic）、`CLAUDE.async.md` を初回 Async 化で seed。`$HOME` 保護ガード。
 - **SyncSessionScheduler** — singleton。`TabManager.$tabs` / `Workspace.objectWillChange` を購読し、最近接 `nextSyncAt` に単一 `DispatchSourceTimer` を arm。発火で `.markAwaitingAttendance` + macOS 通知。
 - **Claude Code hook** — `.cmux/prompt-hook.sh`（bash + jq、fallback あり）+ `.claude/settings.json` の `UserPromptSubmit` に idempotent merge。既存 user hook を保持。
+- **新規 Async workspace 作成 UI** — `NewAsyncWorkspaceFlow`（`Sources/Async/NewAsyncWorkspaceFlow.swift`）が File メニュー + Command Palette に「今すぐ Sync」「後で Sync…」の 2 動線を追加。後者は `ScheduleNextSyncSheet` をモーダル（親があれば sheet、無ければ独立 window）で提示し、確定で `.convertToAsync(initialPhase: .selfRunning, ...)`。
+- **ローカライズ** — `async.*` / `menu.file.newAsyncWorkspace*` / `command.newAsyncWorkspace*` の全 34 キーを `Resources/Localizable.xcstrings` に en/ja で投入。コード側はすべて `String(localized: "key", defaultValue: "English")` に揃え、doc コメントを除くソース中の生 Japanese 文字列をゼロに。
 - ツール: `scripts/add-swift-file.sh` で新規 Swift ファイルを `project.pbxproj` に登録。
-- 単体テスト: `AsyncPhaseTransitionTests`(33) + `AsyncWorkspacePersistenceTests`(8) + `AgentStateEmitterTests`(11) = **52 ケース、全 pass**。
+- **Phase 1.5: agent state path + cwd 配布物の削ぎ落とし** — state.json を **workspace identity** に紐づけて `~/Library/Application Support/<bundleId>/workspaces/<workspaceId>/state.json` に書く。`Sources/Async/AgentStatePaths.swift` で path を一元管理 (テスト用に override 可能)。`prompt-hook.sh` は `~/.cmux/` の global 1 本。hook 登録は `.claude/settings.local.json`（gitignored）に切り替え — `settings.json`（team-shared、git 追跡）は触らない。`CMUX_STATE_FILE` env を全ターミナルに常時注入 (`Sources/GhosttyTerminalView.swift`)。`CLAUDE.async.md` の cwd 配布は廃止（per-turn hook で operating notes は完結、`docs-rmux/agent-state.md` がより詳細なリファレンス）。プロジェクトに残る rmux 痕跡は `.claude/settings.local.json` のみ。
+- 単体テスト: `AsyncPhaseTransitionTests`(33) + `AsyncWorkspacePersistenceTests`(8) + `AgentStateEmitterTests`(12、Phase 1.5 で -1: `CLAUDE.async.md` 関連 2 本削除 + 「プロジェクトに rmux 書き込み物ゼロ」確認 1 本追加) = **53 ケース、全 pass**。
 
 ---
 
 ## 次の具体アクション
 
-**`plan.md` §8 Step 13 — 新規 Async workspace 作成 UI** に着手。
+**Phase 1 MVP はコード上完了。** 次の候補:
 
-1. 既存の「+」(新規 workspace) ボタンの配置を特定し、Normal / Async を選ばせる UI を差し込む（モーダル or セグメント分岐）。
-2. Async 選択時に「今すぐ」「後で (時刻選択)」の 2 択：
-   - 「今すぐ」→ `.convertToAsync(initialPhase: .preparing, nextSyncAt: nil)` で作成直後から preparing overlay。
-   - 「後で」→ `ScheduleNextSyncSheet` を開き、確定で `.convertToAsync(initialPhase: .selfRunning, nextSyncAt: <selected>)`。
-3. 作成時に `AgentStateEmitter.ensureTemplate` / `ensureClaudeCodeHook` は transition 経由で自動実行される。
-4. 最後に Step 14（ローカライズ）で `async.*` キーを `Resources/Localizable.xcstrings` に ja/en で投入。
+1. **実機回帰** — File / Command Palette から「今すぐ Sync」「後で Sync…」を実行し、4 フェーズが期待通り回るか手動確認。日本語 UI と英語 UI の両方で目視。
+2. **Phase 2 着手** — `plan.md` §9 以降。優先度の目安:
+   - 「今すぐ Sync」でフルパス手入力による強摩擦（spec §6.1.6）
+   - `awaitingAttendance` 放置時のリマインド通知頻度ポリシー
+   - `ScheduleNextSyncSheet` に複数 Async workspace 間の衝突検出
+3. **未解決リスト洗い出し** — 下の「仕様の未解決 / 揺れ」に残っている項目を拾い、決着する分は spec/plan に昇格。
 
 ---
 
@@ -49,8 +52,8 @@ Phase 1 Step 1–Step 12 完了。残りは Step 13（新規 Async workspace 作
 - [x] 10. 「今すぐ Sync」確認ダイアログ（SwiftUI .alert で yes/no）
 - [x] 11. 通知抑制（`TerminalNotificationStore.addNotification` で selfRunning/awaitingAttendance を early return）
 - [x] 12. サイドバー行表示（TabItemView に precomputed 文字列バッジ、Equatable 維持）
-- [ ] 13. 新規 Async workspace 作成 UI（Normal / Async + 今すぐ / 後で）
-- [ ] 14. ローカライズ（ja / en）
+- [x] 13. 新規 Async workspace 作成 UI（File メニュー + Command Palette に「今すぐ Sync」「後で Sync…」の 2 動線）
+- [x] 14. ローカライズ（ja / en、`async.*` 34 キーを `Localizable.xcstrings` に投入）
 
 各ステップ完了時に上記チェックを埋め、セッションログに 1–2 行で記録する。
 
@@ -72,6 +75,46 @@ Phase 1 Step 1–Step 12 完了。残りは Step 13（新規 Async workspace 作
 ## セッションログ
 
 新しいものを上に追記。
+
+### 2026-04-24 (ユーザフィードバック対応: Normal 退避 / 10分猶予 / Close→Revert)
+- **Feedback 1 (syncing → Normal 直行)**: `SyncingActionBar` pill に「Normal に戻す」ボタンを追加（`bordered` スタイル、pill 幅を 400→520）。新 transition `.endSyncingAndRevert(at:)` を `AsyncPhaseTransition` に足し、`Workspace+AsyncPhase` で実装（syncing 限定、`lastSyncEndedAt = at` 更新、mode=.normal + async 状態 clear）。確認 alert 付き。ローカライズ 4 キー追加。単体テスト 2 本追加。
+- **Feedback 2 (Overdue 10 分猶予)**: 仕様を書き換え — `selfRunning.nextSyncAt` 到達で直接 `awaitingAttendance` にせず、まず `preparing` へ（新 transition `.scheduledSyncArrived(at:)`）。`preparing` のまま 10 分経過で `awaitingAttendance` にエスカレート（`.markAwaitingAttendance` の source guard を `.selfRunning || .preparing` に拡張）。`SyncSessionScheduler` を二種類の pending fire（arrival / escalation）に対応、armed `PendingFireKind` を保持する形にリファクタ。エスカレーションは silent（到達時点で通知済み、二重通知を避ける）。`SessionPersistenceStore.applyAsyncPastDueCorrection` も同じ 10 分ルールで補正するよう更新。spec.md §3 / §3.1 / §4.6 / §4.7 / §5.1 / §8.1 を新セマンティクスに書き換え。
+- **Feedback 3 (workspace 閉じ → Normal 化)**: `TabManager.closeWorkspace` の冒頭で Async workspace なら `revertToNormal` を呼び、その後 `AgentStateEmitter.discardState` で per-workspace state.json を削除。session persistence には normal として保存されるので再起動で Async のまま甦らない。ウィンドウ閉じは workspace 保持のまま（session 復元可能）のため特別処理なし。新単体テスト 1 本。
+- **テスト結果**: AgentStateEmitterTests / AsyncPhaseTransitionTests / AsyncWorkspacePersistenceTests / SessionPersistenceTests 全 115 ケース pass（新 5 ケース: `testEndSyncingAndRevert*` ×2 / `testScheduledSyncArrived*` ×2 / `testMarkAwaitingAttendanceFromPreparing*` / `testClosingAsyncWorkspaceReverts*` / `testPastDue{Within,Beyond}Grace*` に差し替え）。
+
+### 2026-04-24 (Phase 1.5 追加 — cwd tracking を常時アクティブに)
+- **発見**: ユーザが `~/dev/arata-nakayama-website/` で作業中の workspace から「今すぐ Sync」→ 新 Async workspace が inherited cwd=arata-nakayama で作られ、そこに hook install → ターミナルで `cd ~/dev/loris-front/` しても hook が追従しない。
+- **原因**: `armCwdRetryIfNeeded` が初回 transition 時に「cwd が empty / $HOME だったときだけ」sink を張る設計。inherited cwd が既に非 $HOME の場合は sink 未装着で、その後の cd 操作を検知できなかった。
+- **修正**: `installCwdTracking`（旧 `armCwdRetryIfNeeded`）に改名し、convertToAsync 時に **常に** `$currentDirectory.dropFirst()` sink を装着。`.async` ライフタイム中は継続的に cwd 変化を追跡し、非 $HOME な cwd になるたびに `ensureClaudeCodeHook` + `writeState` を再実行。`revertToNormal` で subscription cancel。`settings.local.json` への write は idempotent なので、同じ cwd に戻ってきても no-op。
+- **新テスト**: `testHookFollowsCwdChange` — workspace を project-a で convertToAsync → project-a/.claude/settings.local.json ができる → workspace.currentDirectory を project-b に変更 → XCTestExpectation + async loop で project-b/.claude/settings.local.json が書かれるのを最大 1 秒待機。AgentStateEmitterTests 13/13 pass。
+- **手動アンブロック**: `~/dev/loris-front/.claude/settings.local.json` には現行ユーザ作業のため手動で hook entry を merge 済み（`permissions` 配列は保持）。
+
+### 2026-04-24 (Phase 1.5 追加 — プロジェクト cwd への書き込みを最小化)
+- **方針確定**: rmux は「人間とエージェントの対話作法」を実現する個人ツール。プロジェクトメンバー全員がこの作法に従う必要はない → rmux が書き込むファイルは **1 個たりとも git 管理下に入ってはいけない**。
+- **`CLAUDE.async.md` 廃止**: `AgentStateEmitter.ensureTemplate(for:)` を削除、`asyncAgentTemplateContent` 本体と Workspace+AsyncPhase 両箇所の呼び出しを除去。operating notes は per-turn hook 出力（`[cmux] phase=...` + 行動ガイダンス）で完結。fuller doc が要るエージェントは `docs-rmux/agent-state.md` を参照。
+- **hook 登録先を `.claude/settings.json` → `.claude/settings.local.json` に変更**: 前者は team-shared / git 追跡、ユーザ絶対パスを含む hook entry を置くと他人の環境で壊れる。後者は Claude Code の慣習で個人用 (gitignored)。`mergeClaudeSettings` の target path 変更のみ、マージロジック / 冪等チェック / 既存 user hook の保全は共通。
+- **テスト**: `testEnsureTemplate*` 2 本削除、`testConvertToAsyncDoesNotPlantAnyFilesInProjectTree`（CLAUDE.md / CLAUDE.async.md / .cmux/ / settings.json が全部存在しないことを確認）を新設。`testConvertToAsyncMergesLocalSettingsPointingAtGlobalHook` は settings.local.json 先のアサートに更新 & settings.json が作られていないことも検証。12 ケース全 pass。
+- **docs 更新**: `spec.md §7.2` に「大前提: rmux が書き込むものは一切 git 管理下に入らない」を明文化。`§7.3.1` と `§7.4` と `agent-state.md §2.3` を settings.local.json 前提に書き換え、`CLAUDE.async.md` 関連記述を削除。`CONVENTIONS.md §1 / §2` の古い `CLAUDE.async.md` / `Resources/AgentTemplates/` 言及を訂正。
+- **テストリポジトリ cleanup**: `~/dev/ritar-portfolio-v2/CLAUDE.async.md` を削除（legacy 配布物）。
+
+### 2026-04-24 (Phase 1.5 — agent state を workspace identity に変更)
+- **発見**: 「今すぐ Sync」で新規 workspace 作って Claude を立ち上げたら、Claude が「自分は Async/self-running モード」と誤認。原因は `<cwd>/.cmux/state.json` が前セッションの stale データ (workspaceId が違う、phase が selfRunning 固定)、新 workspace の `currentDirectory` が空文字列だった瞬間に `writeState` が早期 return していたため上書きされず。
+- **設計判断**: 「state.json を cwd に置く」前提自体が誤り。同じ cwd で複数 Async workspace を立てる、Normal と Async が混在する、過去 workspace を削除した後に同じ cwd を再利用する — どのケースでも壊れる。Identity を **workspace** に切り替え、発見メカニズムを **`CMUX_STATE_FILE` env var** に。
+- **新パス**: `~/Library/Application Support/<bundleId>/workspaces/<workspaceId>/state.json`。`Sources/Async/AgentStatePaths.swift` を新設 (`scripts/add-swift-file.sh` で pbxproj 登録)、`stateRoot` / `globalHookDir` を static var にしてテスト時に override 可能。
+- **AgentStateEmitter**: cwd 依存をやめて workspaceId キーで write。`$HOME` 安全ガードは template/settings 系の cwd-bound 関数だけに残す (state file は app support なので不要)。`discardState(forWorkspaceId:)` を追加 (将来の orphan sweep 用)。
+- **Hook script**: `<cwd>/.cmux/prompt-hook.sh` を全廃し、`~/.cmux/prompt-hook.sh` の **global 1 本** に。`.claude/settings.json` は cwd 単位 (Claude Code 側の制約) のままその global path を登録。冪等マージは「グローバル絶対パスとの完全一致」で判定 (legacy `<cwd>/.cmux/prompt-hook.sh` エントリは敢えてマッチさせない — old build と並走する場合に both 入って良い、次回 cleanup で潰せる)。
+- **Hook 内容**: `${CMUX_STATE_FILE:-.cmux/state.json}` の cwd fallback を撤去。`$CMUX_STATE_FILE` 未設定 / 不在 → 何も出力せず exit 0。Normal workspace でも CMUX_STATE_FILE は常に export するが、ファイルが無いので無害。
+- **Env 注入**: `Sources/GhosttyTerminalView.swift:4421` の `CMUX_WORKSPACE_ID` の隣に `CMUX_STATE_FILE` を追加 (常時設定、Normal workspace でも入れる)。
+- **CLAUDE.async.md**: cwd 配下のまま据え置き (人間が読み書きするドキュメントなので)。
+- **テスト**: `AgentStateEmitterTests` 全面書き直し (per-workspace path / global hook dir を tempRoot に override)。新規ケース: 同 cwd の 2 workspace が独立した state file を持つ、`discardState` がディレクトリごと消す。13 ケース全 pass。
+- **Docs**: `spec.md §7.2` / `§7.3.1` と `agent-state.md §1–§2/§5/§8` を新設計に書き換え (latest-only、変更経緯は残さない)。
+- **既知の残務**: 既存プロジェクトに残っている `<cwd>/.cmux/state.json` と `<cwd>/.cmux/prompt-hook.sh` (旧 layout の遺物) は手動削除推奨。`.claude/settings.json` の旧エントリは hook が CMUX_STATE_FILE を読まないので無害だが、整理したければユーザが削除。orphan sweep の自動化は別途。
+
+### 2026-04-24 (Phase 1 Step 13–14 実装 — MVP 完了)
+- **Step 13**: `Sources/Async/NewAsyncWorkspaceFlow.swift` を新設（`scripts/add-swift-file.sh` 経由で pbxproj 登録）。`createNow(debugSource:)` は `addWorkspaceInPreferredMainWindow` → `.convertToAsync(.preparing, nil)`、`createLater(debugSource:)` は内部クラス `ScheduleNextSyncSheetPresenter` で `ScheduleNextSyncSheet` を親ありなら `beginSheet`、無ければ独立 window で提示し、確定で `.convertToAsync(.selfRunning, <selected>)`。File メニューの「New Workspace」直後に 2 エントリを追加。Command Palette にも 2 コマンド (`palette.newAsyncWorkspace{Now,Later}`) を追加。
+- **Step 14**: Async UI 全域を `String(localized: "key", defaultValue: "English")` に置換。`Resources/Localizable.xcstrings` に 34 キー (`async.common.*` / `async.badge.*` / `async.readyToSync.*` / `async.selfRunning.*` / `async.overdue.*` / `async.syncing.*` / `async.schedule.*` / `async.notification.*` + Step 13 で追加した menu/command) を en+ja で投入。`nextSyncCountdown` / `overdue.title` / `syncing.plannedSuffix` は `%@` 形式に整え、`TimelineView` 内でフォーマット済み文字列を引数に渡す形。doc コメント内の Japanese は残置（コード側は literal 0 を確認）。
+- xcodebuild Debug 成功（既存の Swift 6 concurrency 警告のみ）。
+- Commits (予定): 本セッションで `rmux/phase1/data-model` ブランチ上に 1–2 本、ユーザ確認後に PR。
 
 ### 2026-04-24 (Phase 1 Step 9–12 実装)
 - **Step 9**: `SyncingActionBar` に経過時間 HUD。`TimelineView(.periodic(from: .now, by: 1))` で秒粒度更新、`HH:MM:SS / 予定 HH:MM:SS` 表示、超過時は赤字 + 1 Hz blink (opacity 1.0↔0.45) + `(+HH:MM:SS)` 併記。Pill 幅を 280→400。

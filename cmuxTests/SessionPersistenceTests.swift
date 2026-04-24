@@ -2230,9 +2230,28 @@ final class AsyncWorkspacePersistenceTests: XCTestCase {
 
     // MARK: past-due correction
 
-    func testPastDuePolicyMovesSelfRunningToAwaitingAttendance() throws {
+    func testPastDueWithinGraceMovesSelfRunningToPreparing() throws {
+        // Within the 10-minute grace window the user lands on Ready-to-sync
+        // (preparing) rather than Overdue — they're presumed to be there and
+        // just haven't clicked Start yet. See spec.md §3.1 / §8.1.
         let workspace = Workspace()
-        let pastDue = Date(timeIntervalSinceNow: -60)
+        let pastDue = Date(timeIntervalSinceNow: -60)  // 1 min past → within grace
+        try workspace.transition(.convertToAsync(initialPhase: .selfRunning, nextSyncAt: pastDue))
+
+        let windowSnapshot = Self.windowSnapshot(containing: workspace.sessionSnapshot(includeScrollback: false))
+        let app = AppSessionSnapshot(version: 2, createdAt: 0, windows: [windowSnapshot])
+
+        let adjusted = SessionPersistenceStore.applyAsyncPastDueCorrection(app, now: Date())
+        XCTAssertEqual(adjusted.windows.first?.tabManager.workspaces.first?.asyncPhase, "preparing")
+        XCTAssertEqual(adjusted.windows.first?.tabManager.workspaces.first?.nextSyncAt, pastDue)
+    }
+
+    func testPastDueBeyondGraceMovesSelfRunningToAwaitingAttendance() throws {
+        // Past the grace window (>10 min) the human clearly wasn't there —
+        // fall back to the Overdue framing so re-scheduling is the obvious
+        // next action.
+        let workspace = Workspace()
+        let pastDue = Date(timeIntervalSinceNow: -15 * 60)  // 15 min past → beyond grace
         try workspace.transition(.convertToAsync(initialPhase: .selfRunning, nextSyncAt: pastDue))
 
         let windowSnapshot = Self.windowSnapshot(containing: workspace.sessionSnapshot(includeScrollback: false))

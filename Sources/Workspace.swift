@@ -6690,6 +6690,15 @@ final class Workspace: Identifiable, ObservableObject {
     @Published var plannedDuration: TimeInterval? = nil
     @Published var lastSyncEndedAt: Date? = nil
 
+    /// One-shot subscription that retries the cwd-bound parts of
+    /// AgentStateEmitter (CLAUDE.async.md template + .claude/settings.json
+    /// hook registration) once the terminal reports a real cwd. Set by
+    /// `Workspace.transition(.convertToAsync(...))` when the cwd at
+    /// transition time is empty or $HOME (and so the cwd-bound emitters
+    /// skipped). Self-cancels after the first valid cwd. See
+    /// docs-rmux/PROGRESS.md (Phase 1.5 follow-up).
+    var asyncCwdRetryCancellable: AnyCancellable? = nil
+
     /// Ordinal for CMUX_PORT range assignment (monotonically increasing per app session)
     var portOrdinal: Int = 0
 

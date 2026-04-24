@@ -5344,6 +5344,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         return workspace.id
     }
 
+    /// Locate a workspace by id across every main-window context's TabManager.
+    /// Needed because a workspace created via `addWorkspaceInPreferredMainWindow`
+    /// may live in a per-window TabManager that differs from `self.tabManager`
+    /// (which only points at the most-recently-configured one). Used by
+    /// `NewAsyncWorkspaceFlow` to grab the freshly-created Workspace and apply
+    /// its Async transition. See docs-rmux/PROGRESS.md (Phase 1.5 follow-up).
+    func findWorkspace(id: UUID) -> Workspace? {
+        for context in mainWindowContexts.values {
+            if let match = context.tabManager.tabs.first(where: { $0.id == id }) {
+                return match
+            }
+        }
+        if let match = tabManager?.tabs.first(where: { $0.id == id }) {
+            return match
+        }
+        return nil
+    }
+
     private func preferredMainWindowContextForWorkspaceCreation(
         event: NSEvent? = nil,
         debugSource: String = "unspecified"

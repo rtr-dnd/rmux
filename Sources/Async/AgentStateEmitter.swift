@@ -1,32 +1,35 @@
 import Foundation
 
-/// Public handoff from rmux to agents: writes `.cmux/state.json` whenever an
-/// Async workspace transitions, and (on first convertToAsync) seeds a copy of
-/// `CLAUDE.async.md` in the workspace cwd so agents have operating notes.
+/// Public handoff from rmux to agents.
 ///
-/// See docs-rmux/agent-state.md for the JSON schema and docs-rmux/spec.md §7
-/// for the broader contract.
+/// **Per-workspace, not per-cwd.** State is written to
+/// `AgentStatePaths.stateFilePath(for:)` (default
+/// `~/Library/Application Support/<bundleId>/workspaces/<id>/state.json`).
+/// The terminal env carries `CMUX_STATE_FILE=<that path>`, and the global
+/// hook script (`~/.cmux/prompt-hook.sh`, registered via the cwd's
+/// `.claude/settings.local.json`) reads it. This makes multiple Async
+/// workspaces in the same cwd safe and prevents stale state files from a
+/// deleted workspace affecting a new one that happens to land in the same
+/// directory.
+///
+/// **Everything rmux writes is outside git's path.** `settings.local.json` is
+/// gitignored by Claude Code convention; the state file and hook script live
+/// under $HOME. rmux never touches `CLAUDE.md`, `settings.json`, or the
+/// project root. The agent receives phase guidance through the per-turn
+/// hook output alone — no in-tree documentation is planted.
+///
+/// See docs-rmux/spec.md §7 and docs-rmux/agent-state.md.
 enum AgentStateEmitter {
-    /// Current schema version of `.cmux/state.json`. See docs-rmux/agent-state.md.
+    /// Current schema version of `state.json`. See docs-rmux/agent-state.md.
     static let stateSchemaVersion = 1
 
-    /// Write the workspace's current Async state to `.cmux/state.json` under
-    /// its working directory. For Normal workspaces, removes any stale state
-    /// file. Always atomic (temp + rename), never partial reads.
+    /// Write the workspace's current Async state to its per-workspace state
+    /// file. For Normal workspaces, removes any stale state file. Always
+    /// atomic (temp + rename), never partial reads.
     @MainActor
     static func writeState(for workspace: Workspace, at instant: Date = Date()) {
-        let cwd = workspace.currentDirectory
-        guard !cwd.isEmpty else { return }
-        // Safety: Workspaces constructed without an explicit working directory
-        // fall back to the user's home, and the unit-test suite exercises many
-        // transitions on such bare workspaces. Refusing to write to $HOME
-        // keeps tests from polluting the user's dotfiles; an Async workspace
-        // that actually targets a project will have a real cwd.
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        if cwd == home { return }
-
-        let dirPath = (cwd as NSString).appendingPathComponent(".cmux")
-        let filePath = (dirPath as NSString).appendingPathComponent("state.json")
+        let dirURL = AgentStatePaths.stateDirectory(for: workspace.id)
+        let filePath = AgentStatePaths.stateFilePath(for: workspace.id)
 
         guard workspace.mode == .async else {
             try? FileManager.default.removeItem(atPath: filePath)
@@ -35,7 +38,7 @@ enum AgentStateEmitter {
 
         do {
             try FileManager.default.createDirectory(
-                atPath: dirPath,
+                at: dirURL,
                 withIntermediateDirectories: true,
                 attributes: nil
             )
@@ -59,34 +62,29 @@ enum AgentStateEmitter {
         }
     }
 
-    /// Drop a minimal `CLAUDE.async.md` into the workspace cwd so the agent has
-    /// operating notes (what phases mean, what the state file is). Never
-    /// overwrites an existing file — the user may have customised it.
+    /// Remove a workspace's state file. Call when a workspace is permanently
+    /// destroyed so its state doesn't linger in Application Support.
     @MainActor
-    static func ensureTemplate(for workspace: Workspace) {
-        let cwd = workspace.currentDirectory
-        guard !cwd.isEmpty else { return }
-        // Same $HOME guard as `writeState(for:)`.
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        if cwd == home { return }
-
-        let dest = (cwd as NSString).appendingPathComponent("CLAUDE.async.md")
-        guard !FileManager.default.fileExists(atPath: dest) else { return }
-        try? asyncAgentTemplateContent.write(
-            toFile: dest,
-            atomically: true,
-            encoding: .utf8
-        )
+    static func discardState(forWorkspaceId workspaceId: UUID) {
+        let filePath = AgentStatePaths.stateFilePath(for: workspaceId)
+        try? FileManager.default.removeItem(atPath: filePath)
+        let dirURL = AgentStatePaths.stateDirectory(for: workspaceId)
+        try? FileManager.default.removeItem(at: dirURL)
     }
 
-    /// Install the Claude Code `UserPromptSubmit` hook that reads
-    /// `.cmux/state.json` and prepends a `[cmux] ...` status line to every
-    /// user turn. Writes `.cmux/prompt-hook.sh` (executable) and merges an
-    /// entry into `.claude/settings.json`.
+    /// Install (or refresh) the global Claude Code `UserPromptSubmit` hook
+    /// script, then merge a registration entry into the workspace cwd's
+    /// `.claude/settings.local.json` pointing at that global script.
     ///
-    /// Idempotent: if an entry already references `.cmux/prompt-hook.sh`
-    /// anywhere in `UserPromptSubmit`, no change is made. The script file is
-    /// always rewritten so shell logic upgrades land automatically.
+    /// The script lives at `AgentStatePaths.globalHookScriptPath` (one file
+    /// for all rmux Async workspaces). `settings.local.json` is per-project
+    /// personal config (gitignored by Claude Code convention) — a deliberate
+    /// choice so the hook, which contains a user-absolute path, never lands
+    /// in a shared repo. Writing to `settings.json` would pollute git.
+    ///
+    /// Idempotent at both layers: the script is overwritten so logic upgrades
+    /// land automatically; the settings.local.json merge skips when an entry
+    /// already references the global hook path.
     @MainActor
     static func ensureClaudeCodeHook(for workspace: Workspace) {
         let cwd = workspace.currentDirectory
@@ -94,19 +92,19 @@ enum AgentStateEmitter {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         if cwd == home { return }
 
-        writePromptHookScript(in: cwd)
+        writeGlobalPromptHookScript()
         mergeClaudeSettings(in: cwd)
     }
 
     // MARK: - Hook script
 
     @MainActor
-    private static func writePromptHookScript(in cwd: String) {
-        let dir = (cwd as NSString).appendingPathComponent(".cmux")
-        let path = (dir as NSString).appendingPathComponent("prompt-hook.sh")
+    private static func writeGlobalPromptHookScript() {
+        let dirURL = AgentStatePaths.globalHookDir
+        let path = AgentStatePaths.globalHookScriptPath
         do {
             try FileManager.default.createDirectory(
-                atPath: dir,
+                at: dirURL,
                 withIntermediateDirectories: true,
                 attributes: nil
             )
@@ -127,8 +125,8 @@ enum AgentStateEmitter {
     @MainActor
     private static func mergeClaudeSettings(in cwd: String) {
         let dir = (cwd as NSString).appendingPathComponent(".claude")
-        let path = (dir as NSString).appendingPathComponent("settings.json")
-        let absoluteHookPath = (cwd as NSString).appendingPathComponent(".cmux/prompt-hook.sh")
+        let path = (dir as NSString).appendingPathComponent("settings.local.json")
+        let hookPath = AgentStatePaths.globalHookScriptPath
 
         do {
             try FileManager.default.createDirectory(
@@ -149,13 +147,17 @@ enum AgentStateEmitter {
         var hooks = root["hooks"] as? [String: Any] ?? [:]
         var entries = hooks["UserPromptSubmit"] as? [[String: Any]] ?? []
 
-        // Skip if any existing entry already points at .cmux/prompt-hook.sh —
-        // lets the user customise or move the hook and have cmux respect it.
+        // Skip if any existing entry already points at our hook script (by
+        // suffix `prompt-hook.sh` under the global hook dir, OR an exact
+        // match against the configured hook path — covers test injection).
+        // Legacy `<cwd>/.cmux/prompt-hook.sh` entries from the pre-1.5 layout
+        // are intentionally NOT matched: we'll add the new global entry
+        // alongside them, and the next run can clean up the legacy one.
         let alreadyRegistered = entries.contains { entry -> Bool in
             guard let subHooks = entry["hooks"] as? [[String: Any]] else { return false }
             return subHooks.contains { sub in
                 guard let command = sub["command"] as? String else { return false }
-                return command.hasSuffix(".cmux/prompt-hook.sh") || command == absoluteHookPath
+                return command == hookPath
             }
         }
         if alreadyRegistered { return }
@@ -165,7 +167,7 @@ enum AgentStateEmitter {
             "hooks": [
                 [
                     "type": "command",
-                    "command": absoluteHookPath,
+                    "command": hookPath,
                 ] as [String: Any],
             ],
         ]
@@ -189,18 +191,22 @@ enum AgentStateEmitter {
 
     // MARK: - Shell script body
 
-    /// Contents of `.cmux/prompt-hook.sh`. Reads `.cmux/state.json` and emits
-    /// `[cmux] ...` lines per spec §7.3.2. Depends on `bash` and `jq`; when
-    /// `jq` is missing it emits a single informational line and exits 0.
+    /// Contents of `prompt-hook.sh`. Reads `$CMUX_STATE_FILE` (set by rmux
+    /// per terminal) and emits `[cmux] ...` lines per spec §7.3.2. Depends on
+    /// `bash` and `jq`; when `jq` is missing it emits a single informational
+    /// line and exits 0. When `$CMUX_STATE_FILE` is unset or unreadable
+    /// (terminal opened outside rmux, or workspace is Normal), exits silent.
     private static let promptHookScriptContent: String = """
     #!/bin/bash
     # rmux UserPromptSubmit hook — managed by rmux.
-    # Reads .cmux/state.json and emits "[cmux] …" lines describing the
-    # current Async workspace phase so Claude Code can prepend them to every
-    # user turn. See docs-rmux/spec.md §7.3.2.
+    # Reads the per-workspace state file pointed at by $CMUX_STATE_FILE and
+    # emits "[cmux] …" lines describing the current Async workspace phase so
+    # Claude Code can prepend them to every user turn. See docs-rmux/spec.md
+    # §7.3.2.
     set -eu
 
-    STATE_FILE="${CMUX_STATE_FILE:-.cmux/state.json}"
+    STATE_FILE="${CMUX_STATE_FILE:-}"
+    [ -n "$STATE_FILE" ] || exit 0
     [ -r "$STATE_FILE" ] || exit 0
 
     if ! command -v jq >/dev/null 2>&1; then
@@ -312,51 +318,4 @@ enum AgentStateEmitter {
 
         return payload
     }
-
-    // MARK: - Template
-
-    private static let asyncAgentTemplateContent: String = """
-    # rmux Async workspace — agent operating notes
-
-    This workspace is managed by **rmux** (a cmux fork) as an *Async workspace*:
-    the human operator runs it through periodic **Sync sessions**; between
-    sessions the agent self-runs without human oversight.
-
-    ## Phase awareness
-
-    rmux writes the current phase to `.cmux/state.json` (also exposed through
-    `$CMUX_STATE_FILE`). Read it before replying.
-
-    | phase | meaning | what you should do |
-    | --- | --- | --- |
-    | `preparing` | Ready-to-sync screen is open; no user prompt yet. | Nothing; wait for the first user turn. |
-    | `syncing` | Human is present. | Lead with a summary of what happened since the previous sync. Raise permission gaps, ambiguities, and blocking questions *now* — you will not be able to ask them during self-running. Pace for the planned duration. |
-    | `selfRunning` | Human is not watching; Sync is scheduled for later. | Do not ask clarifying questions. If you hit a permission gap, stop and log it; do not try to route around it. Prefer conservative moves and write down everything you would have asked for the next sync. Do not emit OSC 9/99/777 notifications. |
-    | `awaitingAttendance` | Sync slot has passed; human has not started the session. | Same as `selfRunning`. |
-
-    ## `.cmux/state.json` schema (v1)
-
-    ```json
-    {
-      "schemaVersion": 1,
-      "workspaceId": "...",
-      "phase": "syncing | preparing | selfRunning | awaitingAttendance",
-      "updatedAt": "2026-04-24T00:00:00Z",
-      "syncing": { "startedAt": "...", "plannedDurationSeconds": 1800,
-                   "elapsedSeconds": 540, "overrunSeconds": 0 },
-      "selfRunning": { "nextSyncAt": "...", "remainingSeconds": 7200 },
-      "awaitingAttendance": { "scheduledAt": "...", "overdueSeconds": 300 }
-    }
-    ```
-
-    Phase-specific objects are `null` outside the matching phase. The `*Seconds`
-    fields are snapshots at write time — prefer the absolute ISO timestamps when
-    computing live deltas.
-
-    ## Messages from rmux
-
-    Lines beginning with `[cmux] ` are system events injected by rmux (via the
-    Claude Code `UserPromptSubmit` hook and, in later phases, MCP). Treat them
-    as ground truth for the current phase.
-    """
 }

@@ -135,7 +135,7 @@ struct AsyncOverlayMount: NSViewRepresentable {
             let mask: CACornerMask
             switch phase {
             case .syncing:
-                let pillSize = CGSize(width: 400, height: 44)
+                let pillSize = CGSize(width: 520, height: 44)
                 let padding: CGFloat = 12
                 // Window coordinates: AppKit bottom-left origin, so the top
                 // edge of the workspace content is at maxY.
@@ -341,6 +341,9 @@ struct AsyncPhaseOverlayRoot: View {
                     plannedDuration: planned,
                     onEndSync: { scheduled in
                         try? workspace.transition(.endSyncing(nextSyncAt: scheduled.at, at: Date()))
+                    },
+                    onEndSyncAndRevert: {
+                        try? workspace.transition(.endSyncingAndRevert(at: Date()))
                     }
                 )
             }

@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 
 // rmux Async workspace state mutations and derived helpers.
@@ -80,8 +81,28 @@ extension Workspace {
             plannedDuration = nil
             lastSyncEndedAt = at
 
-        case .markAwaitingAttendance:
+        case .endSyncingAndRevert(let at):
+            guard mode == .async, asyncPhase == .syncing else {
+                throw AsyncPhaseTransitionError.invalidSource(mode: mode, phase: asyncPhase)
+            }
+            mode = .normal
+            asyncPhase = nil
+            nextSyncAt = nil
+            syncStartedAt = nil
+            plannedDuration = nil
+            lastSyncEndedAt = at
+
+        case .scheduledSyncArrived:
             guard mode == .async, asyncPhase == .selfRunning else {
+                throw AsyncPhaseTransitionError.invalidSource(mode: mode, phase: asyncPhase)
+            }
+            asyncPhase = .preparing
+            // nextSyncAt is preserved (just passed) so the scheduler can
+            // arm its escalation timer off nextSyncAt + graceInterval.
+
+        case .markAwaitingAttendance:
+            guard mode == .async,
+                  asyncPhase == .selfRunning || asyncPhase == .preparing else {
                 throw AsyncPhaseTransitionError.invalidSource(mode: mode, phase: asyncPhase)
             }
             asyncPhase = .awaitingAttendance
@@ -131,15 +152,48 @@ extension Workspace {
             }
         }
 
-        // Notify the agent-facing contracts. Template seeding + hook
-        // installation run only while the workspace is Async (both are
-        // idempotent, so every transition can call them without harm).
+        // Notify the agent-facing contracts. Hook installation runs only
+        // while the workspace is Async (idempotent, so every transition can
+        // call it without harm). No in-tree documentation is planted —
+        // operational guidance flows through the per-turn hook output only.
         if mode == .async {
-            AgentStateEmitter.ensureTemplate(for: self)
             AgentStateEmitter.ensureClaudeCodeHook(for: self)
+            installCwdTracking()
+        } else {
+            asyncCwdRetryCancellable = nil
         }
         AgentStateEmitter.writeState(for: self)
         _ = reason  // kept for future telemetry / logging
+    }
+
+    /// Install a cwd subscription that re-runs `ensureClaudeCodeHook` +
+    /// `writeState` on every cwd change. The subscription stays alive for
+    /// the workspace's entire `.async` lifetime (cancelled on
+    /// `revertToNormal`). This handles three overlapping scenarios:
+    ///   1. workspace inherits cwd=$HOME at transition time, real cwd
+    ///      arrives later via OSC 7 (terminal shell integration)
+    ///   2. workspace inherits cwd=project-A, then user `cd project-B` in
+    ///      the terminal — hook follows
+    ///   3. user `cd` mid-session in Normal workspace before Async
+    ///      conversion (not relevant here but symmetric)
+    /// Writes to `.claude/settings.local.json` are gitignored and idempotent,
+    /// so multiple installs across different cwds are additive without
+    /// clobbering each other's state.
+    @MainActor
+    private func installCwdTracking() {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        asyncCwdRetryCancellable = $currentDirectory
+            .dropFirst()
+            .sink { [weak self] newValue in
+                guard let self else { return }
+                let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                if trimmed.isEmpty || trimmed == home { return }
+                Task { @MainActor [weak self] in
+                    guard let self, self.mode == .async else { return }
+                    AgentStateEmitter.ensureClaudeCodeHook(for: self)
+                    AgentStateEmitter.writeState(for: self)
+                }
+            }
     }
 
     // MARK: Derived helpers (for UI / observers)

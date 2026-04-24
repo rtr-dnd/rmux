@@ -21,7 +21,9 @@ struct OverdueOverlay: View {
 
             TimelineView(.periodic(from: .now, by: 30)) { context in
                 let overdue = context.date.timeIntervalSince(scheduledAt)
-                Text("Overdue — 予定は \(SelfRunningOverlay.formatRemaining(overdue)) 前")
+                let overdueLabel = SelfRunningOverlay.formatRemaining(overdue)
+                Text(String(localized: "async.overdue.title",
+                            defaultValue: "Overdue — \(overdueLabel) ago"))
                     .font(.system(size: 40, weight: .semibold))
                     .foregroundStyle(.orange)
                     .monospacedDigit()
@@ -32,10 +34,11 @@ struct OverdueOverlay: View {
                 .foregroundStyle(.secondary)
 
             HStack(spacing: 12) {
-                Button("リスケ") {
+                Button(String(localized: "async.overdue.rescheduleButton", defaultValue: "Reschedule")) {
                     isSchedulingSheetPresented = true
                 }
-                Button("今すぐ開始", action: onStartNow)
+                Button(String(localized: "async.overdue.startNowButton", defaultValue: "Start Now"),
+                       action: onStartNow)
                     .buttonStyle(.borderedProminent)
             }
             .controlSize(.large)

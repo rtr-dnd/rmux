@@ -6362,6 +6362,22 @@ struct ContentView: View {
         )
         contributions.append(
             CommandPaletteCommandContribution(
+                commandId: "palette.newAsyncWorkspaceNow",
+                title: constant(String(localized: "command.newAsyncWorkspaceNow.title", defaultValue: "New Async Workspace (Sync Now)")),
+                subtitle: constant(String(localized: "command.newAsyncWorkspaceNow.subtitle", defaultValue: "Async Workspace")),
+                keywords: ["create", "new", "async", "workspace", "sync", "now"]
+            )
+        )
+        contributions.append(
+            CommandPaletteCommandContribution(
+                commandId: "palette.newAsyncWorkspaceLater",
+                title: constant(String(localized: "command.newAsyncWorkspaceLater.title", defaultValue: "New Async Workspace (Sync Later…)")),
+                subtitle: constant(String(localized: "command.newAsyncWorkspaceLater.subtitle", defaultValue: "Async Workspace")),
+                keywords: ["create", "new", "async", "workspace", "sync", "later", "schedule"]
+            )
+        )
+        contributions.append(
+            CommandPaletteCommandContribution(
                 commandId: "palette.newWindow",
                 title: constant(String(localized: "command.newWindow.title", defaultValue: "New Window")),
                 subtitle: constant(String(localized: "command.newWindow.subtitle", defaultValue: "Window")),
@@ -7122,6 +7138,14 @@ struct ContentView: View {
     private func registerCommandPaletteHandlers(_ registry: inout CommandPaletteHandlerRegistry) {
         registry.register(commandId: "palette.newWorkspace") {
             tabManager.addWorkspace()
+        }
+        registry.register(commandId: "palette.newAsyncWorkspaceNow") {
+            _ = NewAsyncWorkspaceFlow.createNow(debugSource: "palette.newAsyncWorkspaceNow")
+        }
+        registry.register(commandId: "palette.newAsyncWorkspaceLater") {
+            DispatchQueue.main.async {
+                NewAsyncWorkspaceFlow.createLater(debugSource: "palette.newAsyncWorkspaceLater")
+            }
         }
         registry.register(commandId: "palette.openFolder") {
             // Defer so the command palette dismisses before the modal sheet appears.
@@ -11528,11 +11552,16 @@ private struct TabItemView: View, Equatable {
     /// check stays coarse and the sidebar doesn't re-render every tick.
     static func asyncPhaseBadge(for phase: AsyncPhase?) -> String? {
         switch phase {
-        case .preparing: return "Ready"
-        case .syncing: return "Sync 中"
-        case .selfRunning: return "自走"
-        case .awaitingAttendance: return "Overdue"
-        case .none: return nil
+        case .preparing:
+            return String(localized: "async.badge.preparing", defaultValue: "Ready")
+        case .syncing:
+            return String(localized: "async.badge.syncing", defaultValue: "Syncing")
+        case .selfRunning:
+            return String(localized: "async.badge.selfRunning", defaultValue: "Self-running")
+        case .awaitingAttendance:
+            return String(localized: "async.badge.awaitingAttendance", defaultValue: "Overdue")
+        case .none:
+            return nil
         }
     }
 

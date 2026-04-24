@@ -26,14 +26,14 @@ struct ReadyToSyncOverlay: View {
                 .font(.headline)
                 .foregroundStyle(.secondary)
 
-            Text("Ready to sync")
+            Text(String(localized: "async.readyToSync.title", defaultValue: "Ready to sync"))
                 .font(.system(size: 40, weight: .semibold, design: .default))
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("予定時間")
+                Text(String(localized: "async.readyToSync.plannedDuration", defaultValue: "Planned duration"))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
-                Picker("予定時間", selection: $plannedMinutes) {
+                Picker(String(localized: "async.readyToSync.plannedDuration", defaultValue: "Planned duration"), selection: $plannedMinutes) {
                     ForEach(Self.durationMinuteOptions, id: \.self) { minutes in
                         Text(Self.formatDuration(minutes: minutes))
                             .tag(minutes)
@@ -45,9 +45,9 @@ struct ReadyToSyncOverlay: View {
             }
 
             HStack(spacing: 12) {
-                Button("キャンセル", action: onCancel)
+                Button(String(localized: "async.common.cancel", defaultValue: "Cancel"), action: onCancel)
                     .keyboardShortcut(.cancelAction)
-                Button("開始") {
+                Button(String(localized: "async.common.start", defaultValue: "Start")) {
                     onStart(TimeInterval(plannedMinutes * 60))
                 }
                 .buttonStyle(.borderedProminent)

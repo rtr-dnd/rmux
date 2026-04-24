@@ -4419,6 +4419,12 @@ final class TerminalSurface: Identifiable, ObservableObject {
 
         setManagedEnvironmentValue("CMUX_SURFACE_ID", id.uuidString)
         setManagedEnvironmentValue("CMUX_WORKSPACE_ID", tabId.uuidString)
+        // rmux Async workspace state file. Always exported (even for Normal
+        // workspaces) so that toggling Normal ↔ Async doesn't require a
+        // shell restart for the prompt-hook to find the file. The file only
+        // exists while the workspace is Async; the hook exits silently
+        // otherwise. See docs-rmux/spec.md §7.
+        setManagedEnvironmentValue("CMUX_STATE_FILE", AgentStatePaths.stateFilePath(for: tabId))
         // Backward-compatible shell integration keys used by existing scripts/tests.
         setManagedEnvironmentValue("CMUX_PANEL_ID", id.uuidString)
         setManagedEnvironmentValue("CMUX_TAB_ID", tabId.uuidString)

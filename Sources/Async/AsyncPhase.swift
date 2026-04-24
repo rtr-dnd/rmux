@@ -31,7 +31,21 @@ enum AsyncPhaseTransition {
     case enterSyncing(plannedDuration: TimeInterval, at: Date)
     /// Syncing → Self-running. Ends current sync and schedules the next.
     case endSyncing(nextSyncAt: Date, at: Date)
-    /// Self-running → Awaiting-attendance. Fired automatically at `nextSyncAt`.
+    /// Syncing → Normal. Ends current sync without committing to a next
+    /// session; the user just wants to walk away. `lastSyncEndedAt` is
+    /// updated; all other Async state is cleared.
+    case endSyncingAndRevert(at: Date)
+    /// Self-running → Preparing. The scheduler fires this at `nextSyncAt` so
+    /// the human (if present) lands on the Ready-to-sync screen immediately,
+    /// without the jarring "Overdue" framing. If the user doesn't actually
+    /// start the Sync within a grace window, a second scheduler timer
+    /// escalates via `.markAwaitingAttendance`. See spec.md §3.1.
+    case scheduledSyncArrived(at: Date)
+    /// Self-running or Preparing → Awaiting-attendance. Fired by the
+    /// scheduler: from `.selfRunning` when the app was not running at
+    /// `nextSyncAt` and the grace window is already past, and from
+    /// `.preparing` when the scheduled sync time has passed and the user
+    /// hasn't clicked "Start" within the grace window.
     case markAwaitingAttendance
     /// Self-running → Preparing. User-initiated interrupt ("今すぐ Sync").
     case interruptToPreparing

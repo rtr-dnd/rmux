@@ -52,7 +52,7 @@ struct ScheduleNextSyncSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
-            Text("次の Sync の時刻")
+            Text(String(localized: "async.schedule.sheet.title", defaultValue: "Next Sync time"))
                 .font(.title2.weight(.semibold))
 
             quickPickSection
@@ -60,7 +60,7 @@ struct ScheduleNextSyncSheet: View {
             Divider()
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("手動で指定")
+                Text(String(localized: "async.schedule.sheet.manualSection", defaultValue: "Manual"))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                 DatePicker(
@@ -81,12 +81,12 @@ struct ScheduleNextSyncSheet: View {
 
             HStack {
                 Spacer()
-                Button("キャンセル") {
+                Button(String(localized: "async.common.cancel", defaultValue: "Cancel")) {
                     onCancel()
                     dismiss()
                 }
                 .keyboardShortcut(.cancelAction)
-                Button("確定") {
+                Button(String(localized: "async.schedule.sheet.confirm", defaultValue: "Confirm")) {
                     onConfirm(ScheduledSync(at: selectedDate))
                     dismiss()
                 }
@@ -106,7 +106,7 @@ struct ScheduleNextSyncSheet: View {
         let presets = Self.quickPickPresets(from: Date())
         if !presets.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
-                Text("クイックピック")
+                Text(String(localized: "async.schedule.sheet.quickPickSection", defaultValue: "Quick picks"))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                 let columns = [GridItem(.adaptive(minimum: 150), spacing: 8)]
@@ -150,9 +150,9 @@ struct ScheduleNextSyncSheet: View {
 
         var presets: [QuickPickPreset] = []
         let relativeOffsets: [(String, TimeInterval)] = [
-            ("今から 1 時間後", 3600),
-            ("今から 3 時間後", 3 * 3600),
-            ("今から 6 時間後", 6 * 3600),
+            (String(localized: "async.schedule.preset.inHours1", defaultValue: "In 1 hour"), 3600),
+            (String(localized: "async.schedule.preset.inHours3", defaultValue: "In 3 hours"), 3 * 3600),
+            (String(localized: "async.schedule.preset.inHours6", defaultValue: "In 6 hours"), 6 * 3600),
         ]
         for (label, offset) in relativeOffsets {
             let candidate = roundUpTo30Minutes(now.addingTimeInterval(offset))

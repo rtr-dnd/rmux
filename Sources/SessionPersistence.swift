@@ -393,8 +393,12 @@ enum SessionPersistenceStore {
     }
 
     /// Rewrite any persisted Async workspace whose `selfRunning` `nextSyncAt`
-    /// has elapsed into `awaitingAttendance`. Matches spec.md §8.1 restoration
-    /// policy. Kept `internal` so tests can exercise it deterministically.
+    /// has elapsed. Within the grace window (`overdueGraceInterval`, 10 min)
+    /// the workspace is lifted to `.preparing` so the user lands on the
+    /// Ready-to-sync screen; past the grace window it becomes
+    /// `.awaitingAttendance`. Matches spec.md §8.1 restoration policy and
+    /// §3.1 state-machine rules. Kept `internal` so tests can exercise it
+    /// deterministically.
     static func applyAsyncPastDueCorrection(
         _ snapshot: AppSessionSnapshot,
         now: Date
@@ -408,7 +412,12 @@ enum SessionPersistenceStore {
                    ws.asyncPhase == "selfRunning",
                    let nextSyncAt = ws.nextSyncAt,
                    nextSyncAt < now {
-                    ws.asyncPhase = "awaitingAttendance"
+                    let elapsed = now.timeIntervalSince(nextSyncAt)
+                    if elapsed >= SyncSessionScheduler.overdueGraceInterval {
+                        ws.asyncPhase = "awaitingAttendance"
+                    } else {
+                        ws.asyncPhase = "preparing"
+                    }
                 }
                 return ws
             }

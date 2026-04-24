@@ -461,6 +461,14 @@ struct cmuxApp: App {
                     }
                 }
 
+                Button(String(localized: "menu.file.newAsyncWorkspaceNow", defaultValue: "New Async Workspace (Sync Now)")) {
+                    _ = NewAsyncWorkspaceFlow.createNow(debugSource: "menu.newAsyncWorkspaceNow")
+                }
+
+                Button(String(localized: "menu.file.newAsyncWorkspaceLater", defaultValue: "New Async Workspace (Sync Later…)")) {
+                    NewAsyncWorkspaceFlow.createLater(debugSource: "menu.newAsyncWorkspaceLater")
+                }
+
                 splitCommandButton(title: String(localized: "menu.file.openFolder", defaultValue: "Open Folder…"), shortcut: menuShortcut(for: .openFolder)) {
                     AppDelegate.shared?.showOpenFolderPanel()
                 }
