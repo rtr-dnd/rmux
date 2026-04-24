@@ -39,6 +39,7 @@
 		734F49D37E543DD01C2F4FEF /* NotificationAndMenuBarTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2C075029771815DD5DA1332 /* NotificationAndMenuBarTests.swift */; };
 		76329A90011CEE782F8838B3 /* AgentStateEmitter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C25D86B86815BD60D180047 /* AgentStateEmitter.swift */; };
 		786EB5A6E3B7A6C1D854897E /* ScheduleNextSyncSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30889EB125FCBA69CDC6F03E /* ScheduleNextSyncSheet.swift */; };
+		7AC068C00BC4541CA4422464 /* SyncingTitlebarAccessory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97A30DB039B33C908DF5721E /* SyncingTitlebarAccessory.swift */; };
 		7EAAE6A0272D23F752A91C1C /* NewAsyncWorkspaceFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = E407B98244113389AEFD1493 /* NewAsyncWorkspaceFlow.swift */; };
 		807E058A23061EFB70A1B7F8 /* WindowGlassEffect.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B54144FA244A0B482D2903D /* WindowGlassEffect.swift */; };
 		84E00D47E4584162AE53BC8D /* xterm-ghostty in Resources */ = {isa = PBXBuildFile; fileRef = B2E7294509CC42FE9191870E /* xterm-ghostty */; };
@@ -284,6 +285,7 @@
 		818DBCD4AB69EB72573E8138 /* SidebarResizeUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarResizeUITests.swift; sourceTree = "<group>"; };
 		8A4FE96C3F394FC6A6D4B018 /* CmuxCLIPathInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/CmuxCLIPathInstaller.swift; sourceTree = "<group>"; };
 		970226F3C99D0D937CD00539 /* BrowserConfigTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserConfigTests.swift; sourceTree = "<group>"; };
+		97A30DB039B33C908DF5721E /* SyncingTitlebarAccessory.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SyncingTitlebarAccessory.swift; sourceTree = "<group>"; };
 		9960CC3992F3C44489E7627C /* WorkspaceRuntimeSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/WorkspaceRuntimeSettings.swift; sourceTree = "<group>"; };
 		9AD52285508B1D6A9875E7B3 /* SidebarSelectionState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarSelectionState.swift; sourceTree = "<group>"; };
 		9B651D6C903BBA7522480808 /* MultiDayCalendarView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MultiDayCalendarView.swift; sourceTree = "<group>"; };
@@ -536,6 +538,7 @@
 				6E9198923C5150729456A4F0 /* CalendarBridge.swift */,
 				9B651D6C903BBA7522480808 /* MultiDayCalendarView.swift */,
 				430918FF074A71F156F8B65E /* AsyncOverlayContextLine.swift */,
+				97A30DB039B33C908DF5721E /* SyncingTitlebarAccessory.swift */,
 			);
 			name = Async;
 			path = Async;
@@ -1038,6 +1041,7 @@
 				637AF970D1337AB470C1BA0C /* CalendarBridge.swift in Sources */,
 				E83D36F4B9E38C6A3396797A /* MultiDayCalendarView.swift in Sources */,
 				E4BB26E58DF721C6F9CC634F /* AsyncOverlayContextLine.swift in Sources */,
+				7AC068C00BC4541CA4422464 /* SyncingTitlebarAccessory.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

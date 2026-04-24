@@ -3319,6 +3319,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         commandPaletteSelectionByWindowId[windowId] = 0
         commandPaletteSnapshotByWindowId[windowId] = .empty
 
+        // Attach the rmux Async syncing pill as a titlebar accessory on
+        // the right. The accessory self-hides (zero-width) when the
+        // selected workspace isn't syncing, so it's safe to attach once
+        // per window. See docs-rmux/spec.md §6.1.4.
+        if !window.titlebarAccessoryViewControllers.contains(where: {
+            $0.view.identifier == SyncingTitlebarAccessoryViewController.accessoryIdentifier
+        }) {
+            let accessory = SyncingTitlebarAccessoryViewController(tabManager: tabManager)
+            window.addTitlebarAccessoryViewController(accessory)
+        }
+
 #if DEBUG
         dlog(
             "mainWindow.register windowId=\(String(windowId.uuidString.prefix(8))) window={\(debugWindowToken(window))} manager=\(debugManagerToken(tabManager)) priorActiveMgr=\(priorManagerToken) \(debugShortcutRouteSnapshot())"

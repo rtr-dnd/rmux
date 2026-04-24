@@ -135,20 +135,15 @@ struct AsyncOverlayMount: NSViewRepresentable {
             let mask: CACornerMask
             switch phase {
             case .syncing:
-                let pillSize = CGSize(width: 400, height: 44)
-                let padding: CGFloat = 12
-                // Window coordinates: AppKit bottom-left origin, so the top
-                // edge of the workspace content is at maxY.
-                overlayRectInWindow = CGRect(
-                    x: anchorRectInWindow.maxX - pillSize.width - padding,
-                    y: anchorRectInWindow.maxY - pillSize.height - padding,
-                    width: pillSize.width,
-                    height: pillSize.height
-                )
-                mask = [
-                    .layerMinXMinYCorner, .layerMaxXMinYCorner,
-                    .layerMinXMaxYCorner, .layerMaxXMaxYCorner,
-                ]
+                // The syncing HUD lives in the window's titlebar accessory
+                // (SyncingTitlebarAccessoryViewController) now. No child
+                // window is needed over the terminal content — detach any
+                // existing overlay and bail.
+                #if DEBUG
+                dlog("rmux.overlay.refresh detach phase=syncing (moved to titlebar)")
+                #endif
+                detachOverlay()
+                return
             case .preparing, .selfRunning, .awaitingAttendance:
                 overlayRectInWindow = anchorRectInWindow
                 let cornerEdgeTolerance: CGFloat = 1
@@ -348,20 +343,11 @@ struct AsyncPhaseOverlayRoot: View {
                 )
             }
         case .syncing:
-            if let startedAt = workspace.syncStartedAt,
-               let planned = workspace.plannedDuration {
-                SyncingActionBar(
-                    syncStartedAt: startedAt,
-                    plannedDuration: planned,
-                    onEndSync: { scheduled in
-                        workspace.nextSyncPlannedDuration = scheduled.plannedDuration
-                        try? workspace.transition(.endSyncing(nextSyncAt: scheduled.at, at: Date()))
-                    },
-                    onEndSyncAndRevert: {
-                        try? workspace.transition(.endSyncingAndRevert(at: Date()))
-                    }
-                )
-            }
+            // The syncing pill lives in the window's titlebar accessory
+            // (SyncingTitlebarAccessoryViewController) instead of floating
+            // over the terminal, so the overlay mount renders nothing
+            // here. All other phases still use the overlay.
+            EmptyView()
         }
     }
 }
