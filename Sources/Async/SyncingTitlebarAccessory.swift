@@ -84,7 +84,9 @@ final class SyncingTitlebarAccessoryViewController: NSTitlebarAccessoryViewContr
         rootStack.orientation = .horizontal
         rootStack.alignment = .centerY
         rootStack.spacing = 0
-        rootStack.distribution = .fill
+        // `.gravityAreas` respects each view's intrinsic size — without
+        // this the trailing view gets stretched across the whole stack.
+        rootStack.distribution = .gravityAreas
         rootStack.edgeInsets = NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 18)
         rootStack.translatesAutoresizingMaskIntoConstraints = false
 
