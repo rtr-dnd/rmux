@@ -45,14 +45,9 @@ struct ScheduleNextSyncSheet: View {
     let onCancel: () -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @State private var selectedDay: Date
+    @State private var anchorDay: Date
     @State private var selectedSlot: Date?
     @State private var durationMinutes: Int
-
-    /// Slot grid spans 07:00 through 23:00 in 30-min increments.
-    private static let slotHourStart = 7
-    private static let slotHourEnd = 23
-    private static let slotStepMinutes = 30
 
     /// Duration options (minutes).
     static let durationOptions: [Int] = [15, 30, 45, 60, 90, 120, 180]
@@ -70,8 +65,14 @@ struct ScheduleNextSyncSheet: View {
         self.onCancel = onCancel
         let defaultSlot = Self.roundUpTo30Minutes(Date()).addingTimeInterval(3600)
         let candidate = initialDate.map { max($0, defaultSlot) } ?? defaultSlot
-        _selectedDay = State(initialValue: Calendar(identifier: .gregorian).startOfDay(for: candidate))
-        _selectedSlot = State(initialValue: candidate)
+        // Anchor the 3-day window on the day that contains the initial
+        // slot (or today, whichever is later).
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone.current
+        let today = calendar.startOfDay(for: Date())
+        let initialDay = calendar.startOfDay(for: candidate)
+        _anchorDay = State(initialValue: max(initialDay, today))
+        _selectedSlot = State(initialValue: initialDate == nil ? nil : candidate)
         let minutes = initialPlannedDuration
             .map { Int($0 / 60) }
             .flatMap { proposed in
@@ -87,10 +88,12 @@ struct ScheduleNextSyncSheet: View {
 
             durationPicker
 
-            HStack(alignment: .top, spacing: 20) {
-                calendarColumn
-                slotColumn
-            }
+            MultiDayCalendarView(
+                duration: TimeInterval(durationMinutes * 60),
+                selectedSlot: $selectedSlot,
+                anchorDay: $anchorDay,
+                daysShown: 3
+            )
 
             summaryLine
 
@@ -116,7 +119,7 @@ struct ScheduleNextSyncSheet: View {
             }
         }
         .padding(24)
-        .frame(minWidth: 640, minHeight: 520)
+        .frame(minWidth: 720, minHeight: 640)
     }
 
     // MARK: - Duration
@@ -138,89 +141,6 @@ struct ScheduleNextSyncSheet: View {
         }
     }
 
-    // MARK: - Calendar column
-
-    @ViewBuilder
-    private var calendarColumn: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(String(localized: "async.schedule.sheet.dateColumn",
-                        defaultValue: "Date"))
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            DatePicker(
-                "",
-                selection: Binding(
-                    get: { selectedDay },
-                    set: { newValue in
-                        let day = Calendar(identifier: .gregorian).startOfDay(for: newValue)
-                        if day != selectedDay {
-                            selectedDay = day
-                            // Carry the chosen hour into the new day so the
-                            // slot highlight stays on the same offset when
-                            // possible.
-                            if let slot = selectedSlot {
-                                selectedSlot = Self.carryTimeOfDay(from: slot, to: day)
-                            }
-                        }
-                    }
-                ),
-                in: Calendar(identifier: .gregorian).startOfDay(for: Date())...,
-                displayedComponents: .date
-            )
-            .labelsHidden()
-            .datePickerStyle(.graphical)
-            .frame(width: 260)
-        }
-    }
-
-    // MARK: - Slot column
-
-    @ViewBuilder
-    private var slotColumn: some View {
-        let busy = CalendarBridge.shared.busyIntervals(
-            from: selectedDay,
-            to: Calendar(identifier: .gregorian).date(
-                byAdding: .day,
-                value: 1,
-                to: selectedDay
-            ) ?? selectedDay.addingTimeInterval(24 * 3600)
-        )
-        let slots = Self.slots(for: selectedDay)
-        let duration = TimeInterval(durationMinutes * 60)
-        let now = Date()
-
-        VStack(alignment: .leading, spacing: 6) {
-            Text(String(localized: "async.schedule.sheet.slotColumn",
-                        defaultValue: "Time"))
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            ScrollView {
-                LazyVStack(spacing: 4) {
-                    ForEach(slots, id: \.self) { slot in
-                        let isBusy = Self.intersectsBusy(
-                            slot,
-                            durationSeconds: duration,
-                            busy: busy
-                        )
-                        let isPast = slot <= now
-                        let disabled = isBusy || isPast
-                        SlotRow(
-                            slot: slot,
-                            isSelected: selectedSlot == slot,
-                            isBusy: isBusy,
-                            isDisabled: disabled
-                        ) {
-                            selectedSlot = slot
-                        }
-                    }
-                }
-                .padding(.trailing, 4)
-            }
-            .frame(maxHeight: 360)
-        }
-        .frame(minWidth: 240)
-    }
-
     // MARK: - Summary line
 
     @ViewBuilder
@@ -238,43 +158,6 @@ struct ScheduleNextSyncSheet: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
         }
-    }
-
-    // MARK: - Slot helpers
-
-    /// All 30-min slot start times for the given day, from 07:00 to 23:00.
-    static func slots(for day: Date) -> [Date] {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone.current
-        let dayStart = calendar.startOfDay(for: day)
-        var results: [Date] = []
-        var hour = slotHourStart
-        var minute = 0
-        while hour <= slotHourEnd {
-            if let slot = calendar.date(
-                bySettingHour: hour, minute: minute, second: 0, of: dayStart
-            ) {
-                results.append(slot)
-            }
-            minute += slotStepMinutes
-            if minute >= 60 {
-                minute = 0
-                hour += 1
-            }
-        }
-        return results
-    }
-
-    /// Shift a reference date's time-of-day onto a new day.
-    static func carryTimeOfDay(from source: Date, to day: Date) -> Date {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone.current
-        let hour = calendar.component(.hour, from: source)
-        let minute = calendar.component(.minute, from: source)
-        return calendar.date(
-            bySettingHour: hour, minute: minute, second: 0,
-            of: calendar.startOfDay(for: day)
-        ) ?? day
     }
 
     // MARK: - Busy overlap
@@ -332,50 +215,3 @@ struct ScheduleNextSyncSheet: View {
     }
 }
 
-/// Row shown for each 30-min slot in the time column.
-private struct SlotRow: View {
-    let slot: Date
-    let isSelected: Bool
-    let isBusy: Bool
-    let isDisabled: Bool
-    let onSelect: () -> Void
-
-    private static let formatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "HH:mm"
-        return f
-    }()
-
-    var body: some View {
-        Button(action: onSelect) {
-            HStack(spacing: 8) {
-                Text(Self.formatter.string(from: slot))
-                    .font(.body.monospacedDigit())
-                    .foregroundStyle(isDisabled ? .secondary : .primary)
-                Spacer()
-                if isBusy {
-                    Text(String(localized: "async.schedule.preset.busyBadge",
-                                defaultValue: "Busy"))
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                }
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(isSelected ? Color.accentColor.opacity(0.18) : Color.clear)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 6)
-                    .stroke(
-                        isSelected ? Color.accentColor : Color.primary.opacity(0.08),
-                        lineWidth: isSelected ? 1.5 : 1
-                    )
-            )
-        }
-        .buttonStyle(.plain)
-        .disabled(isDisabled)
-    }
-}
