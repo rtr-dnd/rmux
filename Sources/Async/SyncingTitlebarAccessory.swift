@@ -84,6 +84,7 @@ final class SyncingTitlebarAccessoryViewController: NSTitlebarAccessoryViewContr
         rootStack.orientation = .horizontal
         rootStack.alignment = .centerY
         rootStack.spacing = 0
+        rootStack.distribution = .fill
         rootStack.edgeInsets = NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 18)
         rootStack.translatesAutoresizingMaskIntoConstraints = false
 
@@ -177,8 +178,16 @@ final class SyncingTitlebarAccessoryViewController: NSTitlebarAccessoryViewContr
                 startedAt: startedAt,
                 planned: planned
             )
-        } else {
+        } else if workspace == nil || workspace?.mode == .normal {
+            // Normal (or no) selected workspace → offer the Async start
+            // entry. Hidden during Async states other than syncing
+            // (preparing / selfRunning / awaitingAttendance already have
+            // their own full-screen overlays with the right affordances;
+            // another "Start Async Session" button in the titlebar would
+            // be redundant and confusing there).
             showAsyncStartState()
+        } else {
+            showEmptyState()
         }
     }
 
@@ -188,14 +197,26 @@ final class SyncingTitlebarAccessoryViewController: NSTitlebarAccessoryViewContr
         planned: TimeInterval
     ) {
         currentSyncingWorkspace = workspace
-        rootStack.setViews([syncingStack], in: .center)
+        rootStack.setViews([syncingStack], in: .trailing)
+        rootStack.setViews([], in: .center)
+        rootStack.setViews([], in: .leading)
         updateHUD(startedAt: startedAt, planned: planned)
         armHUDTimer()
     }
 
     private func showAsyncStartState() {
         currentSyncingWorkspace = nil
-        rootStack.setViews([asyncStartButton], in: .center)
+        rootStack.setViews([asyncStartButton], in: .trailing)
+        rootStack.setViews([], in: .center)
+        rootStack.setViews([], in: .leading)
+        invalidateHUDTimer()
+    }
+
+    private func showEmptyState() {
+        currentSyncingWorkspace = nil
+        rootStack.setViews([], in: .trailing)
+        rootStack.setViews([], in: .center)
+        rootStack.setViews([], in: .leading)
         invalidateHUDTimer()
     }
 
