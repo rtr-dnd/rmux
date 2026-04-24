@@ -135,7 +135,7 @@ struct AsyncOverlayMount: NSViewRepresentable {
             let mask: CACornerMask
             switch phase {
             case .syncing:
-                let pillSize = CGSize(width: 520, height: 44)
+                let pillSize = CGSize(width: 400, height: 44)
                 let padding: CGFloat = 12
                 // Window coordinates: AppKit bottom-left origin, so the top
                 // edge of the workspace content is at maxY.
@@ -300,6 +300,9 @@ struct AsyncPhaseOverlayRoot: View {
         case .preparing:
             ReadyToSyncOverlay(
                 workspaceTitle: workspace.title,
+                cwd: workspace.currentDirectory,
+                branch: workspace.gitBranch?.branch,
+                isDirty: workspace.gitBranch?.isDirty ?? false,
                 initialPlannedDuration: workspace.nextSyncPlannedDuration,
                 onStart: { duration in
                     try? workspace.transition(.enterSyncing(plannedDuration: duration, at: Date()))
@@ -312,6 +315,9 @@ struct AsyncPhaseOverlayRoot: View {
             if let nextSyncAt = workspace.nextSyncAt {
                 SelfRunningOverlay(
                     workspaceTitle: workspace.title,
+                    cwd: workspace.currentDirectory,
+                    branch: workspace.gitBranch?.branch,
+                    isDirty: workspace.gitBranch?.isDirty ?? false,
                     nextSyncAt: nextSyncAt,
                     initialPlannedDuration: workspace.nextSyncPlannedDuration,
                     onReschedule: { scheduled in
@@ -327,6 +333,9 @@ struct AsyncPhaseOverlayRoot: View {
             if let scheduledAt = workspace.nextSyncAt {
                 OverdueOverlay(
                     workspaceTitle: workspace.title,
+                    cwd: workspace.currentDirectory,
+                    branch: workspace.gitBranch?.branch,
+                    isDirty: workspace.gitBranch?.isDirty ?? false,
                     scheduledAt: scheduledAt,
                     initialPlannedDuration: workspace.nextSyncPlannedDuration,
                     onStartNow: {

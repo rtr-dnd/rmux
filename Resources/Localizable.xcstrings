@@ -91890,6 +91890,23 @@
           }
         }
       }
+    },
+    "async.schedule.sheet.endWithoutSchedule": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "End without scheduling"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "スケジュールせずに終了"
+          }
+        }
+      }
     }
   }
 }

@@ -4,6 +4,9 @@ import SwiftUI
 /// See docs-rmux/spec.md §6.1.1 and plan.md §6.3.
 struct SelfRunningOverlay: View {
     let workspaceTitle: String
+    let cwd: String?
+    let branch: String?
+    let isDirty: Bool
     let nextSyncAt: Date
     /// Duration (seconds) last chosen for this workspace's upcoming Sync,
     /// so the reschedule sheet pre-selects the same value. `nil` → sheet
@@ -24,6 +27,8 @@ struct SelfRunningOverlay: View {
             Text(workspaceTitle)
                 .font(.headline)
                 .foregroundStyle(.secondary)
+
+            AsyncOverlayContextLine(cwd: cwd, branch: branch, isDirty: isDirty)
 
             TimelineView(.periodic(from: .now, by: 30)) { context in
                 let remaining = nextSyncAt.timeIntervalSince(context.date)

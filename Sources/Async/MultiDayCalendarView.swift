@@ -32,8 +32,8 @@ struct MultiDayCalendarView: View {
     /// Prevents re-centering on every view update.
     @State private var didInitialScroll = false
 
-    /// Start hour of the visible grid (inclusive).
-    private static let startHour = 7
+    /// Start hour of the visible grid (inclusive). `0` = midnight.
+    private static let startHour = 0
     /// End hour of the visible grid (exclusive). 24 = midnight of next day.
     private static let endHour = 24
     /// Pixels per minute at standard zoom.
@@ -42,6 +42,10 @@ struct MultiDayCalendarView: View {
     private static let slotMinutes = 30
     /// Width reserved for the hour-label column on the left.
     private static let hourColumnWidth: CGFloat = 44
+    /// Width reserved on the trailing edge of each row — matches the right
+    /// chevron in the header so day columns have the same horizontal
+    /// footprint in both the header and the grid below.
+    private static let rightTrailingWidth: CGFloat = 36
     /// Height of the day-header row above each column.
     private static let headerHeight: CGFloat = 38
 
@@ -94,6 +98,11 @@ struct MultiDayCalendarView: View {
                         ForEach(visibleDays, id: \.self) { day in
                             dayColumn(for: calendar.startOfDay(for: day))
                         }
+                        // Matches the width of the right chevron so the
+                        // day columns in the grid line up under the day
+                        // headers above.
+                        Spacer()
+                            .frame(width: Self.rightTrailingWidth)
                     }
                 }
                 .frame(maxHeight: 420)
@@ -139,13 +148,17 @@ struct MultiDayCalendarView: View {
 
     private var header: some View {
         HStack(spacing: 0) {
-            // Navigation lives in the hour-column slot so the day headers
-            // align perfectly with the grid below.
+            // Left arrow occupies the same width as the hour-label column
+            // below, so the three day-header cells line up exactly with the
+            // three day columns. `.contentShape` widens the hit area to the
+            // full arrow cell (image alone is tiny).
             Button {
                 shift(by: -daysShown)
             } label: {
                 Image(systemName: "chevron.left")
+                    .font(.body.weight(.medium))
                     .frame(width: Self.hourColumnWidth, height: Self.headerHeight)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
@@ -159,7 +172,9 @@ struct MultiDayCalendarView: View {
                 shift(by: daysShown)
             } label: {
                 Image(systemName: "chevron.right")
-                    .frame(width: Self.hourColumnWidth, height: Self.headerHeight)
+                    .font(.body.weight(.medium))
+                    .frame(width: Self.rightTrailingWidth, height: Self.headerHeight)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
         }

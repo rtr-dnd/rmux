@@ -4,6 +4,9 @@ import SwiftUI
 /// See docs-rmux/spec.md §6.1.2 and plan.md §6.4.
 struct OverdueOverlay: View {
     let workspaceTitle: String
+    let cwd: String?
+    let branch: String?
+    let isDirty: Bool
     let scheduledAt: Date
     /// Duration (seconds) last chosen for this workspace, pre-fills the
     /// reschedule sheet. `nil` → sheet default (30 min).
@@ -21,6 +24,8 @@ struct OverdueOverlay: View {
             Text(workspaceTitle)
                 .font(.headline)
                 .foregroundStyle(.secondary)
+
+            AsyncOverlayContextLine(cwd: cwd, branch: branch, isDirty: isDirty)
 
             TimelineView(.periodic(from: .now, by: 30)) { context in
                 let overdue = context.date.timeIntervalSince(scheduledAt)

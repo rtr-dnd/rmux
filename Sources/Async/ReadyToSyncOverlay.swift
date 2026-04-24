@@ -7,6 +7,13 @@ struct ReadyToSyncOverlay: View {
     /// Workspace label displayed at the top. Passed in to keep this view
     /// independent of the Workspace model (easier to preview).
     let workspaceTitle: String
+    /// Current working directory (raw path) — rendered abbreviated under
+    /// the title so the human knows which project this Sync is for.
+    let cwd: String?
+    /// Current git branch name (if any).
+    let branch: String?
+    /// Whether the working tree has uncommitted changes.
+    let isDirty: Bool
     /// Duration (seconds) chosen at schedule-time for this upcoming Sync.
     /// When set, the picker pre-selects the nearest option so the user
     /// doesn't re-pick. `nil` → default 30 min. See spec.md §4.1.
@@ -24,11 +31,17 @@ struct ReadyToSyncOverlay: View {
 
     init(
         workspaceTitle: String,
+        cwd: String? = nil,
+        branch: String? = nil,
+        isDirty: Bool = false,
         initialPlannedDuration: TimeInterval? = nil,
         onStart: @escaping (TimeInterval) -> Void,
         onCancel: @escaping () -> Void
     ) {
         self.workspaceTitle = workspaceTitle
+        self.cwd = cwd
+        self.branch = branch
+        self.isDirty = isDirty
         self.initialPlannedDuration = initialPlannedDuration
         self.onStart = onStart
         self.onCancel = onCancel
@@ -47,6 +60,8 @@ struct ReadyToSyncOverlay: View {
             Text(workspaceTitle)
                 .font(.headline)
                 .foregroundStyle(.secondary)
+
+            AsyncOverlayContextLine(cwd: cwd, branch: branch, isDirty: isDirty)
 
             Text(String(localized: "async.readyToSync.title", defaultValue: "Ready to sync"))
                 .font(.system(size: 40, weight: .semibold, design: .default))

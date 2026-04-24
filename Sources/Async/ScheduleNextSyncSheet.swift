@@ -43,6 +43,11 @@ struct ScheduleNextSyncSheet: View {
     let initialPlannedDuration: TimeInterval?
     let onConfirm: (ScheduledSync) -> Void
     let onCancel: () -> Void
+    /// Optional "end without scheduling" path. When set (typically from
+    /// the syncing pill's "Sync を終える" flow), the sheet shows an extra
+    /// button that ends the current Sync and reverts to Normal instead of
+    /// scheduling a next session. `nil` hides the button.
+    let onEndWithoutSchedule: (() -> Void)?
 
     @Environment(\.dismiss) private var dismiss
     @State private var anchorDay: Date
@@ -57,12 +62,14 @@ struct ScheduleNextSyncSheet: View {
         initialDate: Date? = nil,
         initialPlannedDuration: TimeInterval? = nil,
         onConfirm: @escaping (ScheduledSync) -> Void,
-        onCancel: @escaping () -> Void
+        onCancel: @escaping () -> Void,
+        onEndWithoutSchedule: (() -> Void)? = nil
     ) {
         self.initialDate = initialDate
         self.initialPlannedDuration = initialPlannedDuration
         self.onConfirm = onConfirm
         self.onCancel = onCancel
+        self.onEndWithoutSchedule = onEndWithoutSchedule
         let defaultSlot = Self.roundUpTo30Minutes(Date()).addingTimeInterval(3600)
         let candidate = initialDate.map { max($0, defaultSlot) } ?? defaultSlot
         // Anchor the 3-day window on the day that contains the initial
@@ -98,6 +105,16 @@ struct ScheduleNextSyncSheet: View {
             summaryLine
 
             HStack {
+                if let onEndWithoutSchedule {
+                    Button(role: .destructive) {
+                        onEndWithoutSchedule()
+                        dismiss()
+                    } label: {
+                        Text(String(localized: "async.schedule.sheet.endWithoutSchedule",
+                                    defaultValue: "End without scheduling"))
+                    }
+                    .buttonStyle(.bordered)
+                }
                 Spacer()
                 Button(String(localized: "async.common.cancel", defaultValue: "Cancel")) {
                     onCancel()

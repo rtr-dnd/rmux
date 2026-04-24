@@ -10,12 +10,13 @@ struct SyncingActionBar: View {
     let syncStartedAt: Date
     let plannedDuration: TimeInterval
     let onEndSync: (ScheduledSync) -> Void
-    /// Invoked when the user picks "Normal に戻す" — end the Sync without
-    /// committing to a next session. See docs-rmux/spec.md §4.4.
+    /// Invoked when the user picks "スケジュールせずに終了" inside the end-sync
+    /// sheet — end the Sync without committing to a next session. Threaded
+    /// to the sheet so "End Sync" and "End without scheduling" live in the
+    /// same modal. See docs-rmux/spec.md §4.6.
     let onEndSyncAndRevert: () -> Void
 
     @State private var isSchedulingSheetPresented = false
-    @State private var isRevertConfirmPresented = false
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1.0)) { context in
@@ -32,14 +33,6 @@ struct SyncingActionBar: View {
                     isOverrun: isOverrun,
                     blinkVisible: blinkVisible
                 )
-                Button {
-                    isRevertConfirmPresented = true
-                } label: {
-                    Text(String(localized: "async.syncing.revertButton",
-                                defaultValue: "Revert to Normal"))
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
                 Button {
                     isSchedulingSheetPresented = true
                 } label: {
@@ -64,7 +57,10 @@ struct SyncingActionBar: View {
         .sheet(isPresented: $isSchedulingSheetPresented) {
             // Pre-fill the next Sync's duration with the current session's
             // planned duration — users who picked 45m for this Sync often
-            // want 45m for the next one too.
+            // want 45m for the next one too. The revert-to-Normal path
+            // lives here as an explicit "End without scheduling" action in
+            // the sheet's footer; that way all end-of-sync choices live in
+            // one modal instead of scattering buttons across the pill.
             ScheduleNextSyncSheet(
                 initialDate: nil,
                 initialPlannedDuration: plannedDuration,
@@ -74,21 +70,12 @@ struct SyncingActionBar: View {
                 },
                 onCancel: {
                     isSchedulingSheetPresented = false
+                },
+                onEndWithoutSchedule: {
+                    isSchedulingSheetPresented = false
+                    onEndSyncAndRevert()
                 }
             )
-        }
-        .alert(
-            String(localized: "async.syncing.confirmRevert.title",
-                   defaultValue: "End Sync and revert to Normal?"),
-            isPresented: $isRevertConfirmPresented
-        ) {
-            Button(String(localized: "async.common.cancel", defaultValue: "Cancel"),
-                   role: .cancel) {}
-            Button(String(localized: "async.syncing.confirmRevert.confirm",
-                          defaultValue: "Revert")) { onEndSyncAndRevert() }
-        } message: {
-            Text(String(localized: "async.syncing.confirmRevert.message",
-                        defaultValue: "No next Sync will be scheduled. You can re-enable Async later from the File menu."))
         }
     }
 
