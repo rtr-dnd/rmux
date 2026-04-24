@@ -142,11 +142,19 @@ final class SyncingTitlebarAccessoryViewController: NSTitlebarAccessoryViewContr
     // MARK: - Observation
 
     private func subscribeToTabManager() {
+        // @Published emits in willSet — if we call refresh() synchronously
+        // from the sink, `tabManager.selectedTabId` / `.tabs` still reflect
+        // the OLD values. Hop to the next main runloop so setters have
+        // completed and reads return the new state.
         tabManager.$tabs
-            .sink { [weak self] _ in self?.refresh() }
+            .sink { [weak self] _ in
+                Task { @MainActor [weak self] in self?.refresh() }
+            }
             .store(in: &cancellables)
         tabManager.$selectedTabId
-            .sink { [weak self] _ in self?.refresh() }
+            .sink { [weak self] _ in
+                Task { @MainActor [weak self] in self?.refresh() }
+            }
             .store(in: &cancellables)
     }
 
