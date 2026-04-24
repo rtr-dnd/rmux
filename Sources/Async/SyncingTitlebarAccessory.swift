@@ -34,8 +34,10 @@ final class SyncingTitlebarAccessoryViewController: NSTitlebarAccessoryViewContr
         hostingView.translatesAutoresizingMaskIntoConstraints = true
         hostingView.autoresizingMask = [.width, .height]
 
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: 440, height: 28))
-        container.wantsLayer = true
+        let container = AppearanceTrackingView(
+            frame: NSRect(x: 0, y: 0, width: 460, height: 28),
+            hostingView: hostingView
+        )
         container.autoresizingMask = [.width, .height]
         container.addSubview(hostingView)
         hostingView.frame = container.bounds
@@ -46,6 +48,41 @@ final class SyncingTitlebarAccessoryViewController: NSTitlebarAccessoryViewContr
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) unavailable")
+    }
+}
+
+/// Container NSView that mirrors its window's effective appearance onto
+/// the hosted SwiftUI view. Without this, `Color.primary` / `.labelColor`
+/// sometimes resolve to `.aqua` (light) inside a titlebar accessory on a
+/// dark-styled window, producing unreadable dark-on-dark text.
+private final class AppearanceTrackingView: NSView {
+    private weak var hostingView: NSView?
+    private var appearanceObserver: NSKeyValueObservation?
+
+    init(frame: NSRect, hostingView: NSView) {
+        self.hostingView = hostingView
+        super.init(frame: frame)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) unavailable")
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        syncAppearance()
+        appearanceObserver?.invalidate()
+        appearanceObserver = window?.observe(\.effectiveAppearance, options: [.new]) { [weak self] _, _ in
+            self?.syncAppearance()
+        }
+    }
+
+    private func syncAppearance() {
+        hostingView?.appearance = window?.effectiveAppearance
+    }
+
+    deinit {
+        appearanceObserver?.invalidate()
     }
 }
 
@@ -68,6 +105,7 @@ struct SyncingTitlebarContent: View {
             }
         }
         .frame(maxWidth: .infinity)
+        .padding(.trailing, 18)
     }
 
     @MainActor
@@ -107,7 +145,6 @@ private struct SyncingTitlebarInner: View {
                     try? workspace.transition(.endSyncingAndRevert(at: Date()))
                 }
             )
-            .padding(.trailing, 8)
             .fixedSize()
         } else {
             AsyncStartMenu()
@@ -121,46 +158,59 @@ private struct SyncingTitlebarInner: View {
 /// `createLater`), so the user doesn't have to hunt through menus to
 /// start a Sync.
 private struct AsyncStartMenu: View {
+    @State private var showPopover = false
+
     var body: some View {
-        Menu {
-            Button {
-                _ = NewAsyncWorkspaceFlow.createNow(
-                    debugSource: "titlebar.asyncStart.now"
-                )
-            } label: {
-                Text(String(localized: "async.titlebar.start.now",
-                            defaultValue: "Sync Now"))
-            }
-            Button {
-                NewAsyncWorkspaceFlow.createLater(
-                    debugSource: "titlebar.asyncStart.later"
-                )
-            } label: {
-                Text(String(localized: "async.titlebar.start.later",
-                            defaultValue: "Sync Later…"))
-            }
+        Button {
+            showPopover.toggle()
         } label: {
-            // Manual primary-blue styling: SwiftUI's Menu doesn't play
-            // nicely with `.buttonStyle(.borderedProminent)` on macOS, so
-            // we paint the label ourselves (accent fill + white text) to
-            // get a visible primary-action button in the titlebar.
-            HStack(spacing: 5) {
-                Image(systemName: "calendar.badge.plus")
-                Text(String(localized: "async.titlebar.start.menu",
-                            defaultValue: "Start Async Session"))
-                Image(systemName: "chevron.down")
-                    .font(.caption2.weight(.bold))
-                    .opacity(0.85)
-            }
-            .font(.callout.weight(.medium))
-            .foregroundStyle(.white)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 4)
-            .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 6))
+            Label(
+                String(localized: "async.titlebar.start.menu",
+                       defaultValue: "Start Async Session"),
+                systemImage: "calendar.badge.plus"
+            )
+            .labelStyle(.titleAndIcon)
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .padding(.trailing, 8)
+        .buttonStyle(.borderedProminent)
+        .tint(.accentColor)
+        .controlSize(.small)
+        .popover(isPresented: $showPopover, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 0) {
+                popoverItem(
+                    title: String(localized: "async.titlebar.start.now",
+                                  defaultValue: "Sync Now"),
+                    systemImage: "play.fill"
+                ) {
+                    showPopover = false
+                    _ = NewAsyncWorkspaceFlow.createNow(
+                        debugSource: "titlebar.asyncStart.now"
+                    )
+                }
+                popoverItem(
+                    title: String(localized: "async.titlebar.start.later",
+                                  defaultValue: "Sync Later…"),
+                    systemImage: "calendar"
+                ) {
+                    showPopover = false
+                    NewAsyncWorkspaceFlow.createLater(
+                        debugSource: "titlebar.asyncStart.later"
+                    )
+                }
+            }
+            .padding(6)
+            .frame(minWidth: 200)
+        }
+    }
+
+    @ViewBuilder
+    private func popoverItem(title: String, systemImage: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
     }
 }

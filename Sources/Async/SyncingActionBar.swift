@@ -48,11 +48,6 @@ struct SyncingActionBar: View {
                 .tint(.red)
                 .controlSize(.small)
             }
-            // Explicit macOS label color — `.primary` sometimes rendered
-            // dark-on-dark inside the titlebar accessory. Using the system
-            // label color adapts to the window's effective appearance so
-            // the HUD stays readable on both light and dark titlebars.
-            .foregroundStyle(Color(nsColor: .labelColor))
         }
         .sheet(isPresented: $isSchedulingSheetPresented) {
             // Pre-fill the next Sync's duration with the current session's
@@ -86,18 +81,23 @@ struct SyncingActionBar: View {
         isOverrun: Bool,
         blinkVisible: Bool
     ) -> some View {
+        // Text colors follow the pattern used by cmux's existing titlebar
+        // controls (e.g., UpdatePill): `.primary` for main HUD, `.secondary`
+        // for the "/ planned …" tail. The appearance-tracking container
+        // view forwards the window's effectiveAppearance to the hosting
+        // view so these resolve correctly on light and dark titlebars.
         HStack(spacing: 4) {
             Text(Self.formatHMS(elapsed))
                 .monospacedDigit()
-                .foregroundStyle(isOverrun ? Color.red : Color(nsColor: .labelColor))
+                .foregroundColor(isOverrun ? .red : .primary)
                 .opacity(blinkVisible ? 1.0 : 0.45)
             let plannedLabel = Self.formatHMS(plannedDuration)
             Text(String(localized: "async.syncing.plannedSuffix",
                         defaultValue: "/ planned \(plannedLabel)"))
-                .foregroundStyle(Color(nsColor: .secondaryLabelColor))
+                .foregroundColor(.secondary)
             if isOverrun {
                 Text(" (+\(Self.formatHMS(overrun)))")
-                    .foregroundStyle(.red)
+                    .foregroundColor(.red)
                     .monospacedDigit()
                     .opacity(blinkVisible ? 1.0 : 0.45)
             }
