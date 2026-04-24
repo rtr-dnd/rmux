@@ -74,13 +74,17 @@ enum NewAsyncWorkspaceFlow {
     static func presentScheduleNextSyncSheet(
         parentWindow: NSWindow?,
         initialDate: Date? = nil,
+        initialPlannedDuration: TimeInterval? = nil,
         onConfirm: @escaping (ScheduledSync) -> Void,
-        onCancel: @escaping () -> Void = {}
+        onCancel: @escaping () -> Void = {},
+        onEndWithoutSchedule: (() -> Void)? = nil
     ) {
         let presenter = ScheduleNextSyncSheetPresenter(
             initialDate: initialDate,
+            initialPlannedDuration: initialPlannedDuration,
             onConfirm: onConfirm,
-            onCancel: onCancel
+            onCancel: onCancel,
+            onEndWithoutSchedule: onEndWithoutSchedule
         )
         presenter.present(on: parentWindow)
     }
@@ -92,8 +96,10 @@ enum NewAsyncWorkspaceFlow {
 @MainActor
 private final class ScheduleNextSyncSheetPresenter {
     private let initialDate: Date?
+    private let initialPlannedDuration: TimeInterval?
     private let onConfirm: (ScheduledSync) -> Void
     private let onCancel: () -> Void
+    private let onEndWithoutSchedule: (() -> Void)?
     private var sheetWindow: NSWindow?
     private weak var parentWindow: NSWindow?
     /// Self-retain for the duration of the sheet (AppKit only weakly holds
@@ -102,17 +108,22 @@ private final class ScheduleNextSyncSheetPresenter {
 
     init(
         initialDate: Date?,
+        initialPlannedDuration: TimeInterval?,
         onConfirm: @escaping (ScheduledSync) -> Void,
-        onCancel: @escaping () -> Void
+        onCancel: @escaping () -> Void,
+        onEndWithoutSchedule: (() -> Void)?
     ) {
         self.initialDate = initialDate
+        self.initialPlannedDuration = initialPlannedDuration
         self.onConfirm = onConfirm
         self.onCancel = onCancel
+        self.onEndWithoutSchedule = onEndWithoutSchedule
     }
 
     func present(on parent: NSWindow?) {
         let root = ScheduleNextSyncSheet(
             initialDate: initialDate,
+            initialPlannedDuration: initialPlannedDuration,
             onConfirm: { [weak self] scheduled in
                 guard let self else { return }
                 self.dismiss(confirmed: scheduled)
@@ -120,6 +131,12 @@ private final class ScheduleNextSyncSheetPresenter {
             onCancel: { [weak self] in
                 guard let self else { return }
                 self.dismiss(confirmed: nil)
+            },
+            onEndWithoutSchedule: onEndWithoutSchedule.map { inner in
+                { [weak self] in
+                    inner()
+                    self?.dismiss(confirmed: nil, skipOnCancel: true)
+                }
             }
         )
         let hosting = NSHostingController(rootView: root)
@@ -146,10 +163,10 @@ private final class ScheduleNextSyncSheetPresenter {
         }
     }
 
-    private func dismiss(confirmed: ScheduledSync?) {
+    private func dismiss(confirmed: ScheduledSync?, skipOnCancel: Bool = false) {
         if let confirmed {
             onConfirm(confirmed)
-        } else {
+        } else if !skipOnCancel {
             onCancel()
         }
         guard let window = sheetWindow else {

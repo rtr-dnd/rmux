@@ -91958,6 +91958,23 @@
           }
         }
       }
+    },
+    "async.syncing.plannedSuffixWithOverrun": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "/ planned %1$@  (+%2$@)"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "/ 予定 %1$@  (+%2$@)"
+          }
+        }
+      }
     }
   }
 }
