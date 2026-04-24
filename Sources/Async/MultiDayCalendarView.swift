@@ -24,6 +24,14 @@ struct MultiDayCalendarView: View {
     /// Number of day columns rendered. Keep small (3–5) for legibility.
     let daysShown: Int
 
+    /// Bumped whenever Calendar access state changes or the store posts an
+    /// `EKEventStoreChanged` notification. Touching it in `body` forces a
+    /// re-render so busy-interval queries pick up newly-visible events.
+    @State private var eventStoreRevision: Int = 0
+    /// `true` once we've auto-scrolled to the current time on first render.
+    /// Prevents re-centering on every view update.
+    @State private var didInitialScroll = false
+
     /// Start hour of the visible grid (inclusive).
     private static let startHour = 7
     /// End hour of the visible grid (exclusive). 24 = midnight of next day.
@@ -72,18 +80,41 @@ struct MultiDayCalendarView: View {
     }
 
     var body: some View {
+        // Touch the revision so SwiftUI knows this body depends on it; the
+        // value itself is unused past that.
+        let _ = eventStoreRevision
+
         VStack(spacing: 0) {
             header
             Divider()
-            ScrollView(.vertical, showsIndicators: true) {
-                HStack(alignment: .top, spacing: 0) {
-                    hourColumn
-                    ForEach(visibleDays, id: \.self) { day in
-                        dayColumn(for: calendar.startOfDay(for: day))
+            ScrollViewReader { proxy in
+                ScrollView(.vertical, showsIndicators: true) {
+                    HStack(alignment: .top, spacing: 0) {
+                        hourColumn
+                        ForEach(visibleDays, id: \.self) { day in
+                            dayColumn(for: calendar.startOfDay(for: day))
+                        }
+                    }
+                }
+                .frame(maxHeight: 420)
+                .onAppear {
+                    // Center on the current hour the first time the view
+                    // appears. Defer one runloop so the ScrollView has had
+                    // a chance to lay out its content.
+                    guard !didInitialScroll else { return }
+                    didInitialScroll = true
+                    let hour = calendar.component(.hour, from: Date())
+                    let targetHour = min(
+                        max(hour, Self.startHour),
+                        Self.endHour - 1
+                    )
+                    DispatchQueue.main.async {
+                        withAnimation(nil) {
+                            proxy.scrollTo("hour-\(targetHour)", anchor: .center)
+                        }
                     }
                 }
             }
-            .frame(maxHeight: 420)
         }
         .background(Color(nsColor: .textBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 8))
@@ -91,6 +122,17 @@ struct MultiDayCalendarView: View {
             RoundedRectangle(cornerRadius: 8)
                 .stroke(Color.primary.opacity(0.12), lineWidth: 1)
         )
+        .task {
+            // Fire the TCC prompt on sheet open if we haven't asked yet.
+            // After the user grants (or denies), bump the revision so busy
+            // intervals requery with the new access state.
+            _ = await CalendarBridge.shared.requestAccessIfNeeded()
+            eventStoreRevision &+= 1
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .EKEventStoreChanged)) { _ in
+            // External edits (Calendar.app, iOS, Google sync) → refresh.
+            eventStoreRevision &+= 1
+        }
     }
 
     // MARK: - Header (day labels + navigation)
@@ -149,6 +191,7 @@ struct MultiDayCalendarView: View {
                         .padding(.trailing, 6)
                 }
                 .frame(width: Self.hourColumnWidth, height: 60 * Self.pxPerMinute, alignment: .topTrailing)
+                .id("hour-\(hour)")
             }
         }
         .frame(width: Self.hourColumnWidth, height: gridHeight, alignment: .top)
@@ -191,6 +234,10 @@ struct MultiDayCalendarView: View {
             }
 
             // Clickable slot layer — transparent, full grid height.
+            // `.contentShape(Rectangle())` is required here: SwiftUI won't
+            // hit-test a Button whose label is `Color.clear` or a Rectangle
+            // with zero opacity, so without an explicit content shape the
+            // slot buttons look present but don't receive clicks.
             VStack(spacing: 0) {
                 ForEach(slots, id: \.self) { slot in
                     let isPast = slot <= now
@@ -202,8 +249,9 @@ struct MultiDayCalendarView: View {
                         }
                     } label: {
                         Rectangle()
-                            .fill(Color.clear)
+                            .fill(Color.white.opacity(0.001))
                             .frame(height: CGFloat(Self.slotMinutes) * Self.pxPerMinute)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .disabled(disabled)
